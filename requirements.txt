@@ -1,0 +1,9 @@
+streamlit>=1.40
+openai>=1.40
+pypdf>=5.0
+scikit-learn>=1.4
+pandas>=2.0
+numpy>=1.26
+plotly>=5.20
+python-dotenv>=1.0
+fastembed>=0.7
