@@ -38,6 +38,23 @@ TRAINING_FILE = APP_DIR / "training_history.json"
 PROFILE_FILE = APP_DIR / "profile.json"
 PREPROCESS_VERSION = "2026-10-19-2"  # 改文本处理逻辑时改这里，强制重建索引
 
+
+def _detect_cloud():
+    """判断是否跑在 Streamlit Community Cloud（多用户共用同一个进程和文件系统）。"""
+    try:
+        if os.environ.get("IS_STREAMLIT_CLOUD"):
+            return True
+        if Path("/mount/src").exists():
+            return True
+        if os.environ.get("HOME", "").startswith("/home/appuser"):
+            return True
+    except Exception:
+        pass
+    return False
+
+
+IS_CLOUD = _detect_cloud()
+
 # 支持 .env 文件：在项目文件夹里写 DEEPSEEK_API_KEY=sk-xxx 即可，不必改代码
 try:
     from dotenv import load_dotenv
@@ -1138,6 +1155,8 @@ def load_history():
 
 
 def save_history(history):
+    if IS_CLOUD:
+        return True
     try:
         HISTORY_FILE.write_text(json.dumps(history, ensure_ascii=False, indent=2), encoding="utf-8")
         return True
@@ -1156,6 +1175,8 @@ def load_training():
 
 
 def save_training(data):
+    if IS_CLOUD:
+        return True
     try:
         TRAINING_FILE.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
         return True
@@ -1175,6 +1196,8 @@ def load_profile():
 
 def save_profile(data):
     """记住用户上次填的档案，下次打开不用重填。"""
+    if IS_CLOUD:
+        return
     try:
         txt = json.dumps(data, ensure_ascii=False, indent=2)
         if not PROFILE_FILE.exists() or PROFILE_FILE.read_text(encoding="utf-8") != txt:
@@ -1212,13 +1235,15 @@ def last_exercise_stats(training, name, skip_date=None):
 # 侧边栏
 # --------------------------------------------------------------------------
 if "history" not in st.session_state:
-    st.session_state.history = load_history()
+    st.session_state.history = {} if IS_CLOUD else load_history()
 if "training" not in st.session_state:
-    st.session_state.training = load_training()
+    st.session_state.training = {} if IS_CLOUD else load_training()
+if "saved_profile" not in st.session_state:
+    st.session_state.saved_profile = {} if IS_CLOUD else load_profile()
 if "last_result" not in st.session_state:
     st.session_state.last_result = None
 
-saved = load_profile()
+saved = st.session_state.saved_profile
 
 
 def _pick(options, key, default):
@@ -1512,7 +1537,10 @@ with tab_today:
             st.caption(f"热量与三大营养素由 AI 按菜品估算；本地食材表估算 {res['local_kcal']:.0f} kcal，仅作对照。")
 
         if res["saved"]:
-            st.caption(f"✅ 已保存 {date.today().isoformat()} 的记录（当天重复评估会覆盖）")
+            if IS_CLOUD:
+                st.caption("✅ 已记录到本次会话（云端不写入共享文件，关闭页面后清空）")
+            else:
+                st.caption(f"✅ 已保存 {date.today().isoformat()} 的记录（当天重复评估会覆盖）")
 
         st.markdown("#### 🎯 今天还差什么")
         _gcols = st.columns(3)
@@ -1749,6 +1777,8 @@ with tab_train:
 
 # ---------------------------- 7 天曲线 ----------------------------
 with tab_trend:
+    if IS_CLOUD:
+        st.caption("云端为多人共用，记录只保存在本次浏览会话，不会和别人的数据混在一起。")
     hist = st.session_state.history
     if not hist:
         st.info("还没有记录。回到「今日评估」完成一次评估后，这里会自动生成曲线。")
