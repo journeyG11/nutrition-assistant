@@ -357,6 +357,7 @@ def load_food_data():
             "f": float(it.get("f", 0)),
             "gl": float(it.get("gl", 0)),
             "anti": int(it.get("anti", 5)),
+            "micro": it.get("micro", {}),
             "seasons": ["all"],
             "unit_g": 100,
             "unit": "份",
@@ -366,6 +367,21 @@ def load_food_data():
 
 
 DATA_FOODS = load_food_data()
+MICRO_INDEX = {f["name"]: f.get("micro", {}) for f in DATA_FOODS if f.get("micro")}
+
+
+def micro_for(food):
+    """手写食材没有微量数据时，按名字回查成分表。"""
+    m = food.get("micro") or {}
+    if m:
+        return m
+    name = food["name"]
+    if name in MICRO_INDEX:
+        return MICRO_INDEX[name]
+    for k, v in MICRO_INDEX.items():
+        if k.startswith(name):
+            return v
+    return {}
 
 DISH_CANDIDATES = [APP_DIR / "dishes_cn.json",
                    APP_DIR / "data" / "dishes_cn.json",
@@ -427,6 +443,10 @@ ALIASES.update({
     "鱼": "鱼", "三文鱼": "三文鱼",
     "西蓝花": "西兰花", "花生米": "花生", "炒鸡蛋": "鸡蛋",
     "煎蛋": "鸡蛋",
+    # 常见菜名变体，避免只认出其中一味食材
+    "西红柿炒鸡蛋": "番茄炒蛋", "番茄炒鸡蛋": "番茄炒蛋",
+    "西红柿炒蛋": "番茄炒蛋", "西红柿鸡蛋": "番茄炒蛋",
+    "狮子头": "红烧狮子头", "鸡蛋灌饼": "鸡蛋饼",
 })
 
 # 数据集里常带括号/方括号说明（如「鲈鱼［鲈花］」「西兰花（绿菜花）」），
@@ -518,12 +538,14 @@ DISH_VEG = {
     "麻婆豆腐": 0, "宫保鸡丁": 60, "红烧肉": 0, "蛋炒饭": 30,
 }
 
+# MET 取值来自《中国健康成年人身体活动能量消耗参考值》(T/CSSS)；
+# 游泳该项标准未收录，沿用常用值 8.0
 MET = {
-    "快走": 3.5, "慢跑": 7.0, "跑步": 9.0, "骑行": 6.0, "游泳": 8.0,
-    "跳绳": 12.0, "力量训练": 5.0, "瑜伽": 3.0, "八段锦": 3.0,
-    "羽毛球": 5.5, "乒乓球": 4.0, "健身操": 6.0, "几乎不运动": 1.0,
-    "偶尔运动（类型不定）": 5.0,
-    "篮球": 6.5,
+    "快走": 4.7, "慢跑": 6.5, "跑步": 8.5, "骑行": 5.5, "游泳": 8.0,
+    "跳绳": 10.0, "力量训练": 5.0, "瑜伽": 3.1, "八段锦": 3.1,
+    "羽毛球": 7.4, "乒乓球": 5.1, "健身操": 7.3, "几乎不运动": 1.0,
+    "偶尔运动（类型不定）": 5.0, "篮球": 6.1,
+    "广场舞": 7.2, "爬山": 8.7,
 }
 
 
@@ -570,7 +592,9 @@ def estimate_meal(text):
     """把 "鸡胸肉100g，米饭一碗" 解析成营养估算。未识别食材会单独列出。"""
     text = (text or "").strip()
     result = {"kcal": 0.0, "p": 0.0, "c": 0.0, "f": 0.0, "gl": 0.0,
-              "items": [], "unknown": [], "veg_g": 0.0}
+              "items": [], "unknown": [], "veg_g": 0.0,
+              "micro": {"ca": 0.0, "fe": 0.0, "zn": 0.0, "va": 0.0, "vc": 0.0,
+                        "b1": 0.0, "b2": 0.0, "fib": 0.0}}
     if not text:
         return result
 
@@ -588,16 +612,26 @@ def estimate_meal(text):
         result["c"] += food["c"] * ratio
         result["f"] += food["f"] * ratio
         result["gl"] += food["gl"] * ratio
+        _micro = micro_for(food)
+        for _mk in ("ca", "fe", "zn", "va", "vc", "b1", "b2"):
+            result["micro"][_mk] += float(_micro.get(_mk, 0)) * ratio
+        result["micro"]["fib"] += float(_micro.get("fiber", 0)) * ratio
         if food["name"] in VEG_NAMES:
             result["veg_g"] += grams
         result["veg_g"] += DISH_VEG.get(food["name"], 0)
         result["items"].append({"name": food["name"], "grams": round(grams),
                                 "kcal": round(food["kcal"] * ratio)})
 
-    # 没命中任何食材的片段（例如"辣椒炒肉一份"）单独列出，避免被悄悄当成 0
+    # 没命中任何食材的片段单独列出；另外，带"炒/烧/蒸…"的菜名如果只认出一小段，
+    # 也标为未识别，避免把"鸡蛋饼"算成"鸡蛋"这种严重低估
+    COOK_MARKERS = ("炒", "烧", "炖", "蒸", "炸", "煎", "焖", "烤", "拌", "烩", "爆", "卤")
     leftovers = []
     for seg in re.finditer(r"[^，,、;；\s]+", text):
-        if not any(seg.start() < b and seg.end() > a for a, b in taken):
+        _s, _e = seg.start(), seg.end()
+        _covered = sum(max(0, min(_e, b) - max(_s, a)) for a, b in taken if a < _e and b > _s)
+        _ratio = _covered / max(1, _e - _s)
+        _dish_like = any(m in seg.group(0) for m in COOK_MARKERS)
+        if _covered == 0 or (_dish_like and _ratio < 0.6):
             leftovers.append(seg.group(0))
     result["unknown"] = leftovers[:8]
     return result
@@ -605,12 +639,16 @@ def estimate_meal(text):
 
 def merge_estimates(ests):
     total = {"kcal": 0.0, "p": 0.0, "c": 0.0, "f": 0.0, "gl": 0.0, "veg_g": 0.0,
-             "items": [], "unknown": []}
+             "items": [], "unknown": [],
+             "micro": {"ca": 0.0, "fe": 0.0, "zn": 0.0, "va": 0.0, "vc": 0.0,
+                       "b1": 0.0, "b2": 0.0, "fib": 0.0}}
     for e in ests:
         for k in ("kcal", "p", "c", "f", "gl", "veg_g"):
             total[k] += e[k]
         total["items"].extend(e["items"])
         total["unknown"].extend(e["unknown"])
+        for _k, _v in e["micro"].items():
+            total["micro"][_k] = total["micro"].get(_k, 0.0) + _v
     return total
 
 
@@ -713,6 +751,39 @@ def streak_days(history):
         n += 1
         d -= timedelta(days=1)
     return n
+
+
+# 中国居民膳食营养素参考摄入量（2023）：钙/铁/锌 mg，维A μgRAE，维C mg，纤维 g
+DRI_TABLE = {
+    ("9-11", "男"): {"ca": 1000, "fe": 12, "zn": 7.0, "va": 560, "vc": 75, "fib": 15},
+    ("9-11", "女"): {"ca": 1000, "fe": 16, "zn": 7.5, "va": 540, "vc": 75, "fib": 15},
+    ("12-14", "男"): {"ca": 1000, "fe": 15, "zn": 8.5, "va": 730, "vc": 100, "fib": 20},
+    ("12-14", "女"): {"ca": 1000, "fe": 18, "zn": 7.5, "va": 630, "vc": 100, "fib": 20},
+    ("15-17", "男"): {"ca": 1000, "fe": 16, "zn": 11.5, "va": 810, "vc": 100, "fib": 25},
+    ("15-17", "女"): {"ca": 1000, "fe": 18, "zn": 8.0, "va": 670, "vc": 100, "fib": 25},
+    ("18-29", "男"): {"ca": 800, "fe": 12, "zn": 12.5, "va": 770, "vc": 100, "fib": 25},
+    ("18-29", "女"): {"ca": 800, "fe": 18, "zn": 8.5, "va": 660, "vc": 100, "fib": 25},
+    ("30-49", "男"): {"ca": 800, "fe": 12, "zn": 12.0, "va": 770, "vc": 100, "fib": 25},
+    ("30-49", "女"): {"ca": 800, "fe": 18, "zn": 8.5, "va": 660, "vc": 100, "fib": 25},
+    ("50-64", "男"): {"ca": 800, "fe": 12, "zn": 12.0, "va": 750, "vc": 100, "fib": 25},
+    ("50-64", "女"): {"ca": 800, "fe": 10, "zn": 8.5, "va": 660, "vc": 100, "fib": 25},
+}
+
+
+def dri_for(age, gender):
+    if age <= 11:
+        band = "9-11"
+    elif age <= 14:
+        band = "12-14"
+    elif age <= 17:
+        band = "15-17"
+    elif age <= 29:
+        band = "18-29"
+    elif age <= 49:
+        band = "30-49"
+    else:
+        band = "50-64"
+    return DRI_TABLE.get((band, gender), DRI_TABLE[("18-29", "男")])
 
 
 def exercise_plan(profile, activity_factor, ex_type, minutes, sessions):
@@ -1262,7 +1333,8 @@ def last_exercise_stats(training, name, skip_date=None):
     return None, None
 
 
-CARDIO_OPTIONS = ["篮球", "羽毛球", "跑步", "游泳", "骑行", "跳绳", "快走", "乒乓球", "其他"]
+CARDIO_OPTIONS = ["篮球", "羽毛球", "跑步", "游泳", "骑行", "跳绳", "快走",
+                  "乒乓球", "广场舞", "爬山", "其他"]
 
 
 def cardio_kcal(name, minutes, intensity, weight):
@@ -1660,6 +1732,30 @@ with tab_today:
                 unsafe_allow_html=True,
             )
 
+        st.markdown("#### 🧪 关键营养素（按食材估算）")
+        _dri = dri_for(int(age), gender)
+        _micro = total.get("micro", {})
+        _nut_rows = [("钙", "ca", "mg", _dri["ca"]), ("铁", "fe", "mg", _dri["fe"]),
+                     ("锌", "zn", "mg", _dri["zn"]), ("维生素A", "va", "μg", _dri["va"]),
+                     ("维生素C", "vc", "mg", _dri["vc"]), ("膳食纤维", "fib", "g", _dri["fib"])]
+        if any(_micro.get(_k, 0) > 0 for _, _k, _, _ in _nut_rows):
+            _ncols = st.columns(3)
+            for _i, (_lab, _k, _u, _t) in enumerate(_nut_rows):
+                _v = _micro.get(_k, 0)
+                _pct = min(150.0, _v / max(_t, 1) * 100)
+                _color = "#2F8F5B" if _pct >= 90 else ("#E8A33D" if _pct >= 60 else "#D96B6B")
+                _ncols[_i % 3].markdown(
+                    f'<div class="mcard" style="--accent:{_color}">'
+                    f'<div class="mlabel">{_lab}</div>'
+                    f'<div class="mval" style="font-size:1.1rem">{_v:.0f} / {_t} {_u}</div>'
+                    f'<div class="pbar" style="margin-top:8px">'
+                    f'<span style="width:{min(_pct, 100):.0f}%;background:{_color}"></span></div>'
+                    f'<div class="msub">{_pct:.0f}% 参考摄入量</div></div>',
+                    unsafe_allow_html=True,
+                )
+            st.caption("参考《中国居民膳食营养素参考摄入量（2023）》；菜品暂未拆分到微量营养素，"
+                       "如果这餐主要是菜品，数值会偏低。")
+
         left, right = st.columns([1.6, 1])
         with left:
             st.markdown("#### 🤖 AI 营养评估")
@@ -1711,6 +1807,7 @@ with tab_today:
         st.markdown("#### 🏃 今日运动建议")
         st.caption(f"{ex_type}（{profile['ex_intensity']}）每次约 {ex['per_session']:.0f} kcal，"
                    f"每周 {ex['weekly']:.0f} kcal，折合每天 {ex['train']:.0f} kcal。")
+        st.caption("MET 取值来自《中国健康成年人身体活动能量消耗参考值》(T/CSSS)，强度系数为额外调整。")
         st.caption(f"每日消耗 = 基础代谢 {ex['bmr']:.0f} + 日常活动 {ex['neat']:.0f} + "
                    f"训练 {ex['train']:.0f} = {ex['tdee']:.0f} kcal；"
                    f"建议摄入 {ex['target']:.0f} kcal（已按目标调整）。")
