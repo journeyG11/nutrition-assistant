@@ -524,8 +524,22 @@ def supplement_tips(selected, profile):
 
 SEASON_CN = {"spring": "春", "summer": "夏", "autumn": "秋", "winter": "冬"}
 SEASON_MAP = {"春季": "spring", "夏季": "summer", "秋季": "autumn", "冬季": "winter"}
-EXERCISES = ["深蹲", "硬拉", "卧推", "划船", "肩推", "引体向上", "俯卧撑",
-             "弓步蹲", "腿举", "臀桥", "平板支撑", "卷腹", "哑铃弯举", "绳索下压"]
+EXERCISE_GROUPS = {
+    "胸": ["卧推", "上斜卧推", "俯卧撑", "双杠臂屈伸"],
+    "背": ["划船", "引体向上", "高位下拉", "直臂下压"],
+    "腿": ["深蹲", "硬拉", "罗马尼亚硬拉", "弓步蹲", "腿举", "臀桥", "提踵"],
+    "肩": ["肩推", "侧平举", "面拉"],
+    "臂": ["哑铃弯举", "绳索下压"],
+    "核心": ["平板支撑", "卷腹"],
+}
+EXERCISES = [e for _g in EXERCISE_GROUPS.values() for e in _g]
+GROUP_OF = {e: g for g, es in EXERCISE_GROUPS.items() for e in es}
+
+TEMPLATES = {
+    "推日": ["卧推", "上斜卧推", "肩推", "侧平举", "绳索下压"],
+    "拉日": ["划船", "引体向上", "高位下拉", "哑铃弯举", "面拉"],
+    "腿日": ["深蹲", "罗马尼亚硬拉", "腿举", "弓步蹲", "提踵"],
+}
 VEG_NAMES = {
     "菠菜", "西兰花", "生菜", "番茄", "黄瓜", "胡萝卜", "白菜", "蘑菇", "海带",
     "南瓜", "西兰苔", "芦笋", "秋葵", "油麦菜", "芥蓝", "菜心", "娃娃菜", "冬瓜",
@@ -1360,6 +1374,35 @@ def day_exercise(training, day, weight):
     return sum(i["kcal"] for i in items), items
 
 
+def weekly_group_sets(training, end=None):
+    """最近 7 天各肌群完成的组数。"""
+    end = end or date.today()
+    days = {(end - timedelta(days=i)).isoformat() for i in range(7)}
+    counts = {g: 0 for g in EXERCISE_GROUPS}
+    for d in days:
+        rec = training.get(d) or {}
+        for name, x in (rec.get("exercises") or {}).items():
+            g = GROUP_OF.get(name)
+            if g:
+                counts[g] += int(x.get("sets", 0) or 0)
+    return counts
+
+
+def exercise_progress(training, name):
+    """单个动作的历史：日期、重量、组数、次数、估算 1RM。"""
+    rows = []
+    for d in sorted(training):
+        x = (training[d].get("exercises") or {}).get(name)
+        if not x:
+            continue
+        w = float(x.get("weight", 0) or 0)
+        sets = int(x.get("sets", 0) or 0)
+        reps = int(x.get("reps", 0) or 0)
+        e1 = w * (1 + reps / 30) if (w > 0 and reps > 0) else w
+        rows.append({"date": d, "weight": w, "sets": sets, "reps": reps, "e1rm": round(e1, 1)})
+    return rows
+
+
 # --------------------------------------------------------------------------
 # 侧边栏
 # --------------------------------------------------------------------------
@@ -1888,6 +1931,8 @@ with tab_train:
     t_date = c1.date_input("训练日期", value=date.today())
     t_duration = c2.slider("训练时长（分钟）", 0, 180, 45, step=5)
     t_feel = c3.selectbox("训练感受", ["轻松", "适中", "力竭"], index=1)
+    t_rest = st.slider("组间休息（秒）", 30, 240, 90, step=15)
+    st.caption("增肌常用 60-90 秒；深蹲、硬拉这类大重量复合动作可放到 2-3 分钟。")
 
     with st.container(border=True):
         st.markdown("##### ⚡ 临时运动（今天突然动了一次）")
@@ -1913,9 +1958,19 @@ with tab_train:
                 if save_training(st.session_state.training):
                     st.success(f"已记录：{ck_type} {ck_min} 分钟，约 {_est:.0f} kcal")
 
+    def _apply_template(names):
+        st.session_state["train_picked"] = list(names)
+
+    st.caption("训练模板（一键选中）：")
+    _tc = st.columns(3)
+    _tc[0].button("推日", on_click=_apply_template, args=(TEMPLATES["推日"],), width="stretch")
+    _tc[1].button("拉日", on_click=_apply_template, args=(TEMPLATES["拉日"],), width="stretch")
+    _tc[2].button("腿日", on_click=_apply_template, args=(TEMPLATES["腿日"],), width="stretch")
+
     picked = st.multiselect(
         "今天练了哪些动作", EXERCISES,
         default=[] if muscle < 50 else ["深蹲", "卧推", "划船"],
+        key="train_picked",
     )
     details = {}
     if picked:
@@ -1923,7 +1978,7 @@ with tab_train:
         for name in picked:
             prev_day, prev = last_exercise_stats(st.session_state.training, name,
                                                  skip_date=t_date.isoformat())
-            cw, cs, cr = st.columns([2, 1, 1])
+            cw, cs, cr, cre = st.columns([2, 1, 1, 1])
             w = cw.number_input(
                 f"{name}｜重量 (kg)", 0.0, 400.0,
                 float(prev["weight"]) if prev else 0.0, step=2.5, key=f"w_{name}")
@@ -1933,7 +1988,11 @@ with tab_train:
             r = cr.number_input(
                 f"{name}｜次数", 1, 50,
                 int(prev["reps"]) if prev else 10, key=f"r_{name}")
-            details[name] = {"weight": float(w), "sets": int(s), "reps": int(r)}
+            rpe = cre.selectbox(
+                f"{name}｜RPE", [6, 7, 8, 9, 10], index=2, key=f"rpe_{name}",
+                help="主观用力程度：8 = 还能再做 2 次，10 = 做到力竭")
+            details[name] = {"weight": float(w), "sets": int(s), "reps": int(r),
+                             "rpe": int(rpe)}
             if prev:
                 tip = f"↺ 上次（{prev_day[5:]}）：{prev['weight']:g}kg × {prev['sets']} 组 × {prev['reps']} 次"
                 if prev["weight"] > 0:
@@ -1950,6 +2009,7 @@ with tab_train:
             _day = t_date.isoformat()
             _rec = st.session_state.training.setdefault(_day, {})
             _rec.update({"duration": int(t_duration), "feel": t_feel,
+                         "rest": int(t_rest),
                          "exercises": details, "volume": round(volume, 1)})
             if save_training(st.session_state.training):
                 st.success(f"已保存 {t_date} 的训练：{len(details)} 个动作，容量 {volume:.0f} kg")
@@ -1966,12 +2026,18 @@ with tab_train:
         st.info("还没有训练记录。填一次就会出现在这里。")
     else:
         rows = sorted(train.items(), key=lambda kv: kv[0])[-7:]
-        df_train = pd.DataFrame([{
-            "date": k,
-            "volume": v.get("volume", 0),
-            "duration": v.get("duration", 0),
-            "actions": len(v.get("exercises", {})),
-        } for k, v in rows])
+        _trows = []
+        for k, v in rows:
+            _ex = v.get("exercises") or {}
+            _rpes = [x.get("rpe") for x in _ex.values() if x.get("rpe")]
+            _trows.append({
+                "date": k,
+                "volume": v.get("volume", 0),
+                "duration": v.get("duration", 0),
+                "actions": len(_ex),
+                "rpe": round(sum(_rpes) / len(_rpes), 1) if _rpes else None,
+            })
+        df_train = pd.DataFrame(_trows)
         end_t = datetime.now().date()
         grid_t = pd.DataFrame({"date": [(end_t - timedelta(days=i)).isoformat()
                                         for i in range(6, -1, -1)]})
@@ -2007,8 +2073,58 @@ with tab_train:
         show_train = df_train.copy()
         show_train["date"] = show_train["date"].dt.strftime("%Y-%m-%d")
         show_train = show_train.rename(columns={
-            "date": "日期", "volume": "容量(kg)", "duration": "时长(分钟)", "actions": "动作数"})
+            "date": "日期", "volume": "容量(kg)", "duration": "时长(分钟)",
+            "actions": "动作数", "rpe": "平均RPE"})
         st.dataframe(show_train, hide_index=True, width="stretch")
+
+    st.markdown('<div class="divider-line"></div>', unsafe_allow_html=True)
+    st.markdown("#### 🎯 本周各肌群组数")
+    _sets = weekly_group_sets(st.session_state.training)
+    _gs = go.Figure(go.Bar(x=list(_sets.keys()), y=list(_sets.values()),
+                           marker_color="#7fb3d5"))
+    _gs.update_layout(height=240, margin=dict(l=10, r=10, t=30, b=10), yaxis_title="组数")
+    st.plotly_chart(_gs, width="stretch", config=PLOTLY_CONFIG)
+    st.caption("增肌参考：每个肌群每周 10-20 组；新手从 8-10 组起步，先把动作做标准。")
+
+    _named = [e for e in EXERCISES
+              if any(e in (r.get("exercises") or {}) for r in st.session_state.training.values())]
+    if _named:
+        st.markdown("#### 📈 动作进展")
+        _pick_ex = st.selectbox("选择动作", _named, key="progress_ex")
+        _rows = exercise_progress(st.session_state.training, _pick_ex)
+        if _rows:
+            _dfp = pd.DataFrame(_rows)
+            _dfp["date"] = pd.to_datetime(_dfp["date"])
+            _figp = go.Figure()
+            _figp.add_trace(go.Scatter(x=_dfp["date"], y=_dfp["weight"], mode="lines+markers",
+                                       name="重量 (kg)", line=dict(color="#2F8F5B", width=3)))
+            _figp.add_trace(go.Scatter(x=_dfp["date"], y=_dfp["e1rm"], mode="lines+markers",
+                                       name="估算 1RM", line=dict(color="#E8A33D", dash="dash")))
+            _figp.update_layout(height=260, margin=dict(l=10, r=10, t=30, b=10),
+                                legend=dict(orientation="h", yanchor="bottom", y=1.02))
+            _figp.update_xaxes(type="date", tickformat="%m-%d")
+            st.plotly_chart(_figp, width="stretch", config=PLOTLY_CONFIG)
+            _best = max(_rows, key=lambda r: r["e1rm"])
+            st.caption(f"最佳记录：{_best['date']}｜{_best['weight']:g} kg × {_best['reps']} 次"
+                       f"（估算 1RM {_best['e1rm']:g} kg）")
+
+    st.markdown('<div class="divider-line"></div>', unsafe_allow_html=True)
+    st.markdown("#### 📅 4 周训练周期")
+    _cyc = st.date_input("周期开始日期", value=date.today(), key="cycle_start")
+    _week = ((date.today() - _cyc).days // 7) % 4 + 1 if date.today() >= _cyc else 1
+    st.caption(f"今天是第 {_week} 周（每 4 周循环一次）")
+    _plan = pd.DataFrame([
+        {"周次": "第 1 周 · 适应", "推日": "3 组 × 8-12", "拉日": "3 组 × 8-12",
+         "腿日": "3 组 × 8-12", "目标 RPE": "7"},
+        {"周次": "第 2 周 · 加量", "推日": "4 组 × 8-10", "拉日": "4 组 × 8-10",
+         "腿日": "4 组 × 8-10", "目标 RPE": "8"},
+        {"周次": "第 3 周 · 冲强度", "推日": "4 组 × 6-8", "拉日": "4 组 × 6-8",
+         "腿日": "4 组 × 6-8", "目标 RPE": "9"},
+        {"周次": "第 4 周 · 减载", "推日": "2-3 组 × 8-10", "拉日": "2-3 组 × 8-10",
+         "腿日": "2-3 组 × 8-10", "目标 RPE": "6"},
+    ])
+    st.dataframe(_plan, hide_index=True, width="stretch")
+    st.caption("减载周不是偷懒：降低组数让恢复跟上，下一轮更容易进步。")
 
 
 # ---------------------------- 7 天曲线 ----------------------------
