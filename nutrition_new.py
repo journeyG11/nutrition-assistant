@@ -97,7 +97,7 @@ CSS = """
 
     /* 指标卡片 */
     .mcard {
-        background: var(--secondary-background-color, #fff);
+        background-color: var(--secondary-background-color, #ffffff);
         border: 1px solid rgba(128,128,128,.18);
         border-left: 4px solid var(--accent, #2F8F5B);
         border-radius: 14px; padding: 14px 16px; height: 100%;
@@ -122,7 +122,13 @@ CSS = """
     .divider-line {height: 1px; background: rgba(128,128,128,0.25); margin: 0.6rem 0 1rem 0;}
     .footer {text-align: center; opacity: .45; font-size: .78rem; margin-top: 2rem;}
     div[data-testid="stAlert"] {border-radius: 14px;}
-    section[data-testid="stSidebar"] {background: rgba(47,143,91,0.04);}
+    /* 侧边栏用实色，手机上抽屉展开时不会透出背后的内容 */
+    section[data-testid="stSidebar"],
+    section[data-testid="stSidebar"] > div,
+    [data-testid="stSidebarContent"] {
+        background-color: var(--secondary-background-color, #f7fbf8) !important;
+        border-right: 1px solid rgba(128,128,128,.15);
+    }
     @media (prefers-color-scheme: dark) {
         .tag {background: rgba(47,143,91,0.28);}
         .hero {background: linear-gradient(120deg, rgba(47,143,91,0.22), rgba(73,179,125,0.08));}
