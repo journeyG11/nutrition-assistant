@@ -56,18 +56,41 @@ CSS = """
         --blue: #4A90D9;
         --rose: #D96B6B;
     }
+    .stApp {
+        background:
+            radial-gradient(900px 520px at 100% -10%, rgba(47,143,91,.08), transparent 62%),
+            radial-gradient(700px 420px at -10% 110%, rgba(232,163,61,.05), transparent 60%);
+    }
     .block-container {padding-top: 1.2rem; padding-bottom: 2.5rem; max-width: 1200px;}
 
     /* 顶部横幅 */
     .hero {
-        background: linear-gradient(120deg, rgba(47,143,91,0.14), rgba(73,179,125,0.05));
+        display: flex; justify-content: space-between; align-items: center; gap: 20px;
+        background:
+            radial-gradient(120% 180% at 0% 0%, rgba(47,143,91,.20), transparent 62%),
+            linear-gradient(120deg, rgba(47,143,91,0.10), rgba(73,179,125,0.03));
         border: 1px solid rgba(47,143,91,0.18);
         border-radius: 20px;
         padding: 22px 26px;
         margin-bottom: 18px;
     }
-    .hero h1 {margin: 0; font-size: 1.9rem; letter-spacing: .5px; color: var(--text-color);}
+    .hero h1 {margin: 0; font-size: 2rem; letter-spacing: .5px; color: var(--text-color);}
     .hero p {margin: .35rem 0 0; opacity: .68; font-size: .95rem;}
+    .chips {display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap;}
+    .chip {
+        background: rgba(47,143,91,.12); border: 1px solid rgba(47,143,91,.22);
+        padding: 4px 12px; border-radius: 999px; font-size: .8rem;
+    }
+    .hero-art {font-size: 64px; opacity: .92; filter: drop-shadow(0 8px 16px rgba(47,143,91,.25));}
+
+    /* 健康分环形 */
+    .ring-box {
+        display: flex; align-items: center; justify-content: center; gap: 10px;
+        background: rgba(128,128,128,.10);
+        border: 1px solid rgba(128,128,128,.18); border-radius: 14px;
+        padding: 10px; min-height: 118px;
+        box-shadow: 0 2px 8px rgba(0,0,0,.04);
+    }
 
     /* 小标题左侧色条 */
     h3 {border-left: 4px solid var(--brand); padding-left: 10px; margin-top: 1.3rem !important;}
@@ -97,12 +120,14 @@ CSS = """
 
     /* 指标卡片 */
     .mcard {
-        background-color: var(--secondary-background-color, #ffffff);
+        background-color: rgba(128,128,128,.10);
         border: 1px solid rgba(128,128,128,.18);
         border-left: 4px solid var(--accent, #2F8F5B);
-        border-radius: 14px; padding: 14px 16px; height: 100%;
+        border-radius: 14px; padding: 14px 16px; min-height: 96px;
         box-shadow: 0 2px 8px rgba(0,0,0,.04);
+        transition: transform .15s ease, box-shadow .15s ease;
     }
+    .mcard:hover {transform: translateY(-2px); box-shadow: 0 6px 18px rgba(0,0,0,.07);}
     .mlabel {font-size: .78rem; opacity: .62; letter-spacing: .4px;}
     .mval {font-size: 1.75rem; font-weight: 700; margin-top: 2px; line-height: 1.2;}
     .msub {font-size: .78rem; opacity: .62; margin-top: 2px;}
@@ -132,11 +157,14 @@ CSS = """
     @media (prefers-color-scheme: dark) {
         .tag {background: rgba(47,143,91,0.28);}
         .hero {background: linear-gradient(120deg, rgba(47,143,91,0.22), rgba(73,179,125,0.08));}
+        .mcard, .ring-box {background-color: rgba(255,255,255,.06); border-color: rgba(255,255,255,.14);}
     }
     /* 手机上让图表不抢手势，页面可以正常上下滑动 */
     @media (max-width: 640px) {
         div[data-testid="stPlotlyChart"] {pointer-events: none; touch-action: pan-y;}
         .stTabs [data-baseweb="tab-list"] {flex-wrap: wrap;}
+        .hero-art {display: none;}
+        .hero h1 {font-size: 1.55rem;}
     }
 </style>
 """
@@ -155,6 +183,25 @@ def metric_card(col, label, value, sub="", color="#2F8F5B"):
         f'<div class="mval">{value}</div>'
         f'<div class="msub">{sub}</div></div>',
         unsafe_allow_html=True,
+    )
+
+
+def score_ring(score, color="#2F8F5B", size=104):
+    """健康分环形仪表：比一个数字更有"体感"。"""
+    r = 34
+    circ = 2 * 3.1415926 * r
+    off = circ * (1 - max(0, min(100, score)) / 100)
+    return (
+        f'<svg width="{size}" height="{size}" viewBox="0 0 84 84">'
+        f'<circle cx="42" cy="42" r="{r}" fill="none" stroke="rgba(128,128,128,.18)" stroke-width="8"/>'
+        f'<circle cx="42" cy="42" r="{r}" fill="none" stroke="{color}" stroke-width="8" '
+        f'stroke-linecap="round" stroke-dasharray="{circ:.1f}" stroke-dashoffset="{off:.1f}" '
+        f'transform="rotate(-90 42 42)"/>'
+        f'<text x="42" y="47" text-anchor="middle" font-size="20" font-weight="700" '
+        f'fill="currentColor">{score}</text>'
+        f'<text x="42" y="62" text-anchor="middle" font-size="8" fill="currentColor" '
+        f'opacity=".55">健康分</text>'
+        '</svg>'
     )
 
 
@@ -619,6 +666,30 @@ def health_score(total, profile, risks):
         score -= 10
     score -= 8 * max(0, len([r for r in risks if "未发现" not in r]) - 2)
     return int(max(35, min(100, round(score))))
+
+
+def gap_advice(total, profile, ex):
+    """算出今天还差什么，用具体食物给出补齐方案。"""
+    tips = []
+    dp = profile["protein_need"] - total["p"]
+    if dp >= 8:
+        if dp <= 12:
+            tips.append(("蛋白质还差", "水煮蛋 2 个", "约 14 g 蛋白 / 140 kcal"))
+        elif dp <= 25:
+            tips.append(("蛋白质还差", "无糖酸奶 200 g + 鸡蛋 1 个", "约 19 g 蛋白 / 240 kcal"))
+        else:
+            tips.append(("蛋白质还差", "鸡胸肉 150 g 或豆腐 200 g", f"约 30 g 蛋白，缺口 {dp:.0f} g"))
+    if total["veg_g"] < 300:
+        tips.append(("蔬菜还差", "炒青菜一份（约 250 g）",
+                     f"补 {300 - total['veg_g']:.0f} g / 约 120 kcal"))
+    dk = ex["target"] - total["kcal"]
+    if dk > 250:
+        tips.append(("热量还差", "杂粮饭半碗 + 一小把坚果", f"约 {min(dk, 300):.0f} kcal"))
+    elif dk < -250:
+        tips.append(("热量超出", "晚餐主食减半，或饭后快走 30 分钟", f"超出 {-dk:.0f} kcal"))
+    if not tips:
+        tips.append(("三项达标", "保持今天的搭配", "热量、蛋白质、蔬菜都在合理区间"))
+    return tips[:3]
 
 
 def exercise_plan(profile, activity_factor, ex_type, minutes, sessions):
@@ -1275,10 +1346,18 @@ def kb_summary():
 # 主界面
 # --------------------------------------------------------------------------
 st.markdown(
-    """
+    f"""
     <div class="hero">
-      <h1>🥗 您的专属营养助手</h1>
-      <p>真实文档检索 · 膳食评估 · 运动建议 · 应季食材</p>
+      <div>
+        <h1>🥗 您的专属营养助手</h1>
+        <p>真实文档检索 · 膳食评估 · 运动建议 · 应季食材</p>
+        <div class="chips">
+          <span class="chip">🎯 今日目标 {ex['target']:.0f} kcal</span>
+          <span class="chip">🥩 蛋白质 {profile['protein_need']:.0f} g</span>
+          <span class="chip">📅 已记录 {len(st.session_state.history)} 天</span>
+        </div>
+      </div>
+      <div class="hero-art">🥗</div>
     </div>
     """,
     unsafe_allow_html=True,
@@ -1291,11 +1370,45 @@ tab_today, tab_train, tab_trend, tab_kb = st.tabs(
 # ---------------------------- 今日评估 ----------------------------
 with tab_today:
     st.markdown("#### 🍽️ 一日三餐录入")
+    PRESETS = {
+        "食堂套餐": {"bf": "小笼包一笼，豆浆一杯",
+                     "lunch": "米饭150g，青椒肉丝一份，炒青菜一份",
+                     "dinner": "米饭100g，番茄炒蛋一份，紫菜蛋花汤一碗",
+                     "snack": ""},
+        "减脂日": {"bf": "燕麦40g，牛奶250ml，鸡蛋1个",
+                   "lunch": "米饭100g，鸡胸肉150g，西兰花200g",
+                   "dinner": "红薯150g，鱼100g，菠菜150g",
+                   "snack": "苹果1个"},
+        "增肌日": {"bf": "燕麦60g，牛奶250ml，鸡蛋2个",
+                   "lunch": "米饭200g，牛肉150g，西兰花150g",
+                   "dinner": "米饭150g，鸡胸肉150g，豆腐100g",
+                   "snack": "酸奶150g，核桃10g"},
+    }
+
+    def _apply_preset(p):
+        for _k, _v in p.items():
+            st.session_state[f"meal_{_k}"] = _v
+
+    st.caption("懒得打字？点一下直接填好一整天：")
+    _pc = st.columns(4)
+    _pc[0].button("🍱 食堂套餐", on_click=_apply_preset,
+                  args=(PRESETS["食堂套餐"],), width="stretch")
+    _pc[1].button("🥗 减脂日", on_click=_apply_preset,
+                  args=(PRESETS["减脂日"],), width="stretch")
+    _pc[2].button("💪 增肌日", on_click=_apply_preset,
+                  args=(PRESETS["增肌日"],), width="stretch")
+    if _pc[3].button("🧹 清空", width="stretch"):
+        for _k in ("bf", "lunch", "dinner", "snack"):
+            st.session_state[f"meal_{_k}"] = ""
+
     c1, c2, c3 = st.columns(3)
-    breakfast = c1.text_area("早餐", height=90, placeholder="例：燕麦40g，牛奶250ml，鸡蛋1个")
-    lunch = c2.text_area("午餐", height=90, placeholder="例：米饭150g，鸡胸肉100g，西兰花150g")
-    dinner = c3.text_area("晚餐", height=90, placeholder="例：红薯150g，鱼100g，菠菜100g")
-    snack = st.text_input("加餐（可选）", placeholder="例：苹果1个，酸奶150g")
+    breakfast = c1.text_area("早餐", height=90, key="meal_bf",
+                             placeholder="例：燕麦40g，牛奶250ml，鸡蛋1个")
+    lunch = c2.text_area("午餐", height=90, key="meal_lunch",
+                         placeholder="例：米饭150g，鸡胸肉100g，西兰花150g")
+    dinner = c3.text_area("晚餐", height=90, key="meal_dinner",
+                          placeholder="例：红薯150g，鱼100g，菠菜100g")
+    snack = st.text_input("加餐（可选）", key="meal_snack", placeholder="例：苹果1个，酸奶150g")
 
     with st.expander("📏 不知道多少克？常见份量速查"):
         st.markdown(
@@ -1375,15 +1488,18 @@ with tab_today:
         st.markdown('<div class="divider-line"></div>', unsafe_allow_html=True)
         if total["unknown"]:
             st.warning("这些内容在本地食材表里没找到，未计入本地估算：" + "、".join(total["unknown"]))
-        m1, m2, m3, m4, m5 = st.columns(5)
         score_color = "#2F8F5B" if res["score"] >= 80 else ("#E8A33D" if res["score"] >= 60 else "#D96B6B")
-        metric_card(m1, "健康分", f"{res['score']}", "满分 100", score_color)
-        metric_card(m2, "估算热量", f"{total['kcal']:.0f}",
+        m0, m1, m2, m3, m4 = st.columns([1.15, 1, 1, 1, 1])
+        m0.markdown(
+            f'<div class="ring-box">{score_ring(res["score"], score_color)}</div>',
+            unsafe_allow_html=True,
+        )
+        metric_card(m1, "估算热量", f"{total['kcal']:.0f}",
                     f"{total['kcal'] - ex['target']:+.0f} kcal vs 目标", "#E8A33D")
-        metric_card(m3, "蛋白质", f"{total['p']:.0f} g",
+        metric_card(m2, "蛋白质", f"{total['p']:.0f} g",
                     f"目标 {profile['protein_need']:.0f} g", "#4A90D9")
-        metric_card(m4, "蔬菜", f"{total['veg_g']:.0f} g", "建议 300 g 以上", "#4CB47F")
-        metric_card(m5, "运动消耗", f"{ex['daily_avg']:.0f}", "kcal / 天", "#8E7CC3")
+        metric_card(m3, "蔬菜", f"{total['veg_g']:.0f} g", "建议 300 g 以上", "#4CB47F")
+        metric_card(m4, "运动消耗", f"{ex['daily_avg']:.0f}", "kcal / 天", "#8E7CC3")
 
         p_prot = min(100.0, total["p"] / max(profile["protein_need"], 1) * 100)
         p_veg = min(100.0, total["veg_g"] / 300 * 100)
@@ -1403,6 +1519,18 @@ with tab_today:
 
         if res["saved"]:
             st.caption(f"✅ 已保存 {date.today().isoformat()} 的记录（当天重复评估会覆盖）")
+
+        st.markdown("#### 🎯 今天还差什么")
+        _gcols = st.columns(3)
+        for _col, (_tag, _food, _note) in zip(_gcols, gap_advice(total, profile, ex)):
+            _color = "#2F8F5B" if "达标" in _tag else "#E8A33D"
+            _col.markdown(
+                f'<div class="mcard" style="--accent:{_color}">'
+                f'<div class="mlabel">{_tag}</div>'
+                f'<div class="mval" style="font-size:1.05rem">{_food}</div>'
+                f'<div class="msub">{_note}</div></div>',
+                unsafe_allow_html=True,
+            )
 
         left, right = st.columns([1.6, 1])
         with left:
