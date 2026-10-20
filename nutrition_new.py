@@ -18,7 +18,7 @@ import json
 import os
 import re
 import hashlib
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
@@ -35,6 +35,7 @@ APP_DIR = Path(__file__).resolve().parent
 PDF_DIR = Path(os.environ.get("NUTRITION_PDF_DIR", str(APP_DIR / "pdf")))
 HISTORY_FILE = APP_DIR / "nutrition_history.json"
 TRAINING_FILE = APP_DIR / "training_history.json"
+PROFILE_FILE = APP_DIR / "profile.json"
 PREPROCESS_VERSION = "2026-10-19-2"  # 改文本处理逻辑时改这里，强制重建索引
 
 # 支持 .env 文件：在项目文件夹里写 DEEPSEEK_API_KEY=sk-xxx 即可，不必改代码
@@ -48,30 +49,98 @@ st.set_page_config(page_title="您的专属营养助手", page_icon="🥗", layo
 
 CSS = """
 <style>
-    .block-container {padding-top: 1.6rem; padding-bottom: 2rem; max-width: 1280px;}
-    h1, h2, h3 {color: #1f6b45;}
-    div[data-testid="stMetric"] {
-        background: #ffffff;
-        border: 1px solid #e2efe7;
-        border-radius: 14px;
-        padding: 12px 16px;
-        box-shadow: 0 1px 3px rgba(31,107,69,0.06);
+    :root {
+        --brand: #2F8F5B;
+        --brand-2: #4CB47F;
+        --amber: #E8A33D;
+        --blue: #4A90D9;
+        --rose: #D96B6B;
     }
-    div[data-testid="stMetricLabel"] p {font-size: 0.82rem; color: #5b7a68;}
-    .stTabs [data-baseweb="tab-list"] {gap: 8px;}
-    .stTabs [data-baseweb="tab"] {
-        background: #f1f8f3; border-radius: 10px 10px 0 0; padding: 6px 18px;
+    .block-container {padding-top: 1.2rem; padding-bottom: 2.5rem; max-width: 1200px;}
+
+    /* 顶部横幅 */
+    .hero {
+        background: linear-gradient(120deg, rgba(47,143,91,0.14), rgba(73,179,125,0.05));
+        border: 1px solid rgba(47,143,91,0.18);
+        border-radius: 20px;
+        padding: 22px 26px;
+        margin-bottom: 18px;
     }
+    .hero h1 {margin: 0; font-size: 1.9rem; letter-spacing: .5px; color: var(--text-color);}
+    .hero p {margin: .35rem 0 0; opacity: .68; font-size: .95rem;}
+
+    /* 小标题左侧色条 */
+    h3 {border-left: 4px solid var(--brand); padding-left: 10px; margin-top: 1.3rem !important;}
+
+    /* 标签页：胶囊式 */
+    .stTabs [data-baseweb="tab-list"] {
+        gap: 4px; background: rgba(47,143,91,0.08); padding: 4px; border-radius: 14px;
+    }
+    .stTabs [data-baseweb="tab"] {border-radius: 10px; padding: 6px 16px; background: transparent;}
+    .stTabs [aria-selected="true"] {background: var(--brand) !important;}
+    .stTabs [aria-selected="true"] p {color: #fff !important;}
+
+    /* 按钮 */
+    .stButton > button {
+        border-radius: 12px; font-weight: 600;
+        border: 1px solid rgba(47,143,91,.25); transition: all .15s ease;
+    }
+    .stButton > button:hover {transform: translateY(-1px);}
+    .stButton > button[kind="primary"] {
+        background: linear-gradient(135deg, #2F8F5B, #4CB47F);
+        border: none; box-shadow: 0 4px 14px rgba(47,143,91,.25);
+    }
+
+    /* 输入框圆角 */
+    .stTextInput input, .stTextArea textarea, .stNumberInput input,
+    div[data-baseweb="select"] > div {border-radius: 10px !important;}
+
+    /* 指标卡片 */
+    .mcard {
+        background: var(--secondary-background-color, #fff);
+        border: 1px solid rgba(128,128,128,.18);
+        border-left: 4px solid var(--accent, #2F8F5B);
+        border-radius: 14px; padding: 14px 16px; height: 100%;
+        box-shadow: 0 2px 8px rgba(0,0,0,.04);
+    }
+    .mlabel {font-size: .78rem; opacity: .62; letter-spacing: .4px;}
+    .mval {font-size: 1.75rem; font-weight: 700; margin-top: 2px; line-height: 1.2;}
+    .msub {font-size: .78rem; opacity: .62; margin-top: 2px;}
+
+    /* 进度条 */
+    .pbar {background: rgba(128,128,128,.16); border-radius: 999px; height: 8px; overflow: hidden;}
+    .pbar > span {display: block; height: 100%; border-radius: 999px;}
+    .prow {display: flex; justify-content: space-between; font-size: .8rem; opacity: .7; margin-bottom: 4px;}
+
+    /* 其他 */
     .tag {
-        display: inline-block; background: #eaf6ee; color: #1f6b45;
+        display: inline-block; background: rgba(47,143,91,0.16); color: inherit;
         border-radius: 999px; padding: 3px 12px; margin: 3px 4px 3px 0;
         font-size: 0.86rem;
     }
-    .hint {color: #6b7f72; font-size: 0.85rem;}
-    .divider-line {height: 1px; background: #dcefe3; margin: 0.6rem 0 1rem 0;}
+    .hint {opacity: 0.7; font-size: 0.85rem;}
+    .divider-line {height: 1px; background: rgba(128,128,128,0.25); margin: 0.6rem 0 1rem 0;}
+    .footer {text-align: center; opacity: .45; font-size: .78rem; margin-top: 2rem;}
+    div[data-testid="stAlert"] {border-radius: 14px;}
+    section[data-testid="stSidebar"] {background: rgba(47,143,91,0.04);}
+    @media (prefers-color-scheme: dark) {
+        .tag {background: rgba(47,143,91,0.28);}
+        .hero {background: linear-gradient(120deg, rgba(47,143,91,0.22), rgba(73,179,125,0.08));}
+    }
 </style>
 """
 st.markdown(CSS, unsafe_allow_html=True)
+
+
+def metric_card(col, label, value, sub="", color="#2F8F5B"):
+    """自绘指标卡，比 st.metric 更容易统一视觉。"""
+    col.markdown(
+        f'<div class="mcard" style="--accent:{color}">'
+        f'<div class="mlabel">{label}</div>'
+        f'<div class="mval">{value}</div>'
+        f'<div class="msub">{sub}</div></div>',
+        unsafe_allow_html=True,
+    )
 
 
 # --------------------------------------------------------------------------
@@ -341,6 +410,22 @@ def local_risks(total, profile):
         risks.append("含添加糖食物：当天建议不再叠加甜饮或甜点")
     if any(n in names for n in ("油条", "薯片")):
         risks.append("含油炸/膨化食品：反式脂肪与钠偏高，建议替换为坚果或水果")
+    if profile.get("sleep_h", 7) < 7:
+        risks.append(f"睡眠不足：平均 {profile['sleep_h']:.1f} 小时，建议 7-9 小时，"
+                     "睡眠不足会放大饥饿感和肌肉流失")
+    if profile.get("water_ml", 1500) < 1500:
+        risks.append(f"饮水偏少：约 {profile['water_ml']} ml，建议 1500-1700 ml，分次喝")
+    if profile.get("fasting_glu", 0) >= 6.1:
+        risks.append(f"空腹血糖 {profile['fasting_glu']:.1f} mmol/L 偏高（≥6.1），"
+                     "建议复查并咨询医生，不要只靠饮食自行判断")
+    bf = profile.get("body_fat", 0)
+    if bf:
+        limit = 30 if profile["gender"] == "女" else 25
+        if bf >= limit:
+            risks.append(f"体脂率 {bf:.0f}% 偏高（{profile['gender']}性参考上限约 {limit}%）")
+    if profile.get("supplements"):
+        risks.append("已记录补剂：" + "、".join(profile["supplements"])
+                     + "（补剂不计入饮食热量；蛋白粉要算进当日蛋白质）")
     if not risks:
         risks.append("未发现明显的膳食结构问题，继续保持")
     return risks
@@ -386,7 +471,13 @@ def exercise_plan(profile, activity_factor, ex_type, minutes, sessions):
     target = max(tdee + surplus - deficit, floor, profile["bmr"] * 1.05)
 
     rows = []
-    if profile["period"] == "经期中":
+    if profile.get("ex_sessions", 0) == 0 or profile.get("ex_type") == "几乎不运动":
+        rows = [
+            ("日常步行", "6000 步", "每天", "不追求运动量，先把日常活动补起来"),
+            ("久坐提醒", "每小时起身 2-3 分钟", "学习/工作时", "减少久坐对代谢和腰背的影响"),
+            ("爬楼梯 / 快走", "10-15 分钟", "每天 1-2 次", "最容易坚持的入门活动"),
+        ]
+    elif profile["period"] == "经期中":
         rows = [
             ("散步 / 拉伸", "20-30 分钟", "每天", "经期以低强度为主，缓解腹部不适"),
             ("瑜伽（阴瑜伽/修复）", "20 分钟", "3-4 次/周", "避免倒立和高强度跳跃"),
@@ -725,6 +816,9 @@ def build_prompt(profile, meals, total, ex, sources, kb_note, training=None):
 
     meal_txt = "\n".join(f"- {k}：{v or '未填写'}" for k, v in meals.items())
     plan_txt = "\n".join(f"- {r[0]}，{r[1]}，{r[2]}（{r[3]}）" for r in ex["rows"])
+    bf_txt = f"{profile['body_fat']:.0f}%" if profile.get("body_fat") else "未填"
+    glu_txt = f"{profile['fasting_glu']:.1f} mmol/L" if profile.get("fasting_glu") else "未填"
+    sup_txt = "、".join(profile.get("supplements") or []) or "无"
 
     return f"""
 你是专业营养师，请用中文、条理清晰地评估下面这一天的饮食。
@@ -733,6 +827,8 @@ def build_prompt(profile, meals, total, ex, sources, kb_note, training=None):
 性别：{profile['gender']}，年龄：{profile['age']} 岁，身高 {profile['height']} cm，体重 {profile['weight']} kg，BMI {profile['bmi']:.1f}
 基础代谢 BMR：{profile['bmr']:.0f} kcal；TDEE：{ex['tdee']:.0f} kcal；今日建议摄入：{ex['target']:.0f} kcal
 身体状态：生理期 {profile['period']}，考试周 {profile['exam']}，备注：{profile['note'] or '无'}
+睡眠：{profile.get('sleep_h', 7):.1f} 小时/天；饮水：{profile.get('water_ml', 1500)} ml/天
+体脂率：{bf_txt}；空腹血糖：{glu_txt}；补剂：{sup_txt}
 目标权重：减脂 {profile['weight_loss']}，增肌 {profile.get('muscle', 0)}，控糖 {profile['sugar_ctrl']}，抗炎 {profile['anti_inflammatory']}
 每日蛋白质目标：{profile['protein_need']:.0f} g（{profile['protein_need'] / profile['weight']:.1f} g/kg）
 
@@ -773,6 +869,7 @@ def build_prompt(profile, meals, total, ex, sources, kb_note, training=None):
 - 不要编造文档里没有的数字或结论，不确定就写"不确定"；
 - 扫描版 PDF 没能读取，不要假装引用它；
 - 语气温和，不要制造焦虑。
+- 如血糖或体脂率异常，只给生活方式建议并提示就医，不要做医学诊断。
 
 最后一行必须单独输出整日估算（不要加其他文字）：
 <estimate>{{"kcal": 数字, "protein": 数字, "carb": 数字, "fat": 数字}}</estimate>
@@ -835,6 +932,25 @@ def save_training(data):
         return False
 
 
+def load_profile():
+    if PROFILE_FILE.exists():
+        try:
+            return json.loads(PROFILE_FILE.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+    return {}
+
+
+def save_profile(data):
+    """记住用户上次填的档案，下次打开不用重填。"""
+    try:
+        txt = json.dumps(data, ensure_ascii=False, indent=2)
+        if not PROFILE_FILE.exists() or PROFILE_FILE.read_text(encoding="utf-8") != txt:
+            PROFILE_FILE.write_text(txt, encoding="utf-8")
+    except Exception:
+        pass
+
+
 def training_summary(record):
     """把一条训练记录拼成一句给 AI 看的描述。"""
     if not record:
@@ -870,12 +986,20 @@ if "training" not in st.session_state:
 if "last_result" not in st.session_state:
     st.session_state.last_result = None
 
+saved = load_profile()
+
+
+def _pick(options, key, default):
+    value = saved.get(key, default)
+    return options.index(value) if value in options else options.index(default)
+
+
 with st.sidebar:
     st.header("👤 用户基础档案")
-    gender = st.selectbox("性别", ["女", "男"])
-    age = st.number_input("年龄", min_value=10, max_value=90, value=20)
-    height = st.number_input("身高（cm）", min_value=120, max_value=220, value=160)
-    weight = st.number_input("体重（kg）", min_value=30, max_value=200, value=55)
+    gender = st.selectbox("性别", ["女", "男"], index=_pick(["女", "男"], "gender", "女"))
+    age = st.number_input("年龄", min_value=10, max_value=90, value=int(saved.get("age", 20)))
+    height = st.number_input("身高（cm）", min_value=120, max_value=220, value=int(saved.get("height", 160)))
+    weight = st.number_input("体重（kg）", min_value=30, max_value=200, value=int(saved.get("weight", 55)))
 
     bmr = 10 * weight + 6.25 * height - 5 * age - (161 if gender == "女" else 5)
     bmi = weight / ((height / 100) ** 2)
@@ -887,31 +1011,47 @@ with st.sidebar:
 
     st.markdown('<div class="divider-line"></div>', unsafe_allow_html=True)
     st.header("🩺 身体状态")
-    period = st.selectbox("生理期状态", ["非经期", "经期中", "经期前后"])
-    exam = st.selectbox("是否考试周", ["否", "是"])
-    note = st.text_area("其他备注", height=70, placeholder="例如：容易疲劳、肠胃敏感、乳糖不耐")
+    if gender == "女":
+        period = st.selectbox("生理期状态", ["非经期", "经期中", "经期前后"],
+                              index=_pick(["非经期", "经期中", "经期前后"], "period", "非经期"))
+    else:
+        period = "不适用"
+        st.caption("男性用户不显示生理期设置")
+    exam = st.selectbox("是否考试周", ["否", "是"], index=_pick(["否", "是"], "exam", "否"))
+    note = st.text_area("其他备注", height=70, value=saved.get("note", ""),
+                        placeholder="例如：容易疲劳、肠胃敏感、乳糖不耐")
+    with st.expander("📋 更多健康数据（可选）"):
+        sleep_h = st.slider("平均睡眠（小时）", 0.0, 12.0, float(saved.get("sleep_h", 7.0)), step=0.5)
+        water_ml = st.slider("每日饮水（ml）", 0, 4000, int(saved.get("water_ml", 1500)), step=100)
+        body_fat = st.number_input("体脂率 %（不知道填 0）", 0.0, 60.0,
+                                   float(saved.get("body_fat", 0.0)), step=1.0)
+        fasting_glu = st.number_input("空腹血糖 mmol/L（不知道填 0）", 0.0, 30.0,
+                                      float(saved.get("fasting_glu", 0.0)), step=0.1)
+        supplements = st.multiselect("正在吃的补剂", ["蛋白粉", "维生素D", "铁剂", "钙片",
+                                              "鱼油", "复合维生素", "肌酸"],
+                                     default=saved.get("supplements", []))
 
     st.markdown('<div class="divider-line"></div>', unsafe_allow_html=True)
     st.header("🎯 营养目标权重")
-    weight_loss = st.slider("减脂", 0, 100, 60)
-    muscle = st.slider("增肌", 0, 100, 0,
+    weight_loss = st.slider("减脂", 0, 100, int(saved.get("weight_loss", 60)))
+    muscle = st.slider("增肌", 0, 100, int(saved.get("muscle", 0)),
                        help="增肌目标越高，热量会留出盈余，蛋白质目标提到 1.6 g/kg")
-    sugar_ctrl = st.slider("控糖", 0, 100, 50)
-    anti_inflammatory = st.slider("抗炎", 0, 100, 50)
+    sugar_ctrl = st.slider("控糖", 0, 100, int(saved.get("sugar_ctrl", 50)))
+    anti_inflammatory = st.slider("抗炎", 0, 100, int(saved.get("anti_inflammatory", 50)))
     if muscle >= 50 and weight_loss >= 50:
         st.caption("⚠️ 减脂和增肌同时拉高会接近维持热量，建议主攻一个。")
 
     st.markdown('<div class="divider-line"></div>', unsafe_allow_html=True)
     st.header("🏃 运动情况")
-    activity_label = st.selectbox(
-        "日常活动量",
-        ["久坐（办公室/上课为主）", "轻度（经常走动）", "中度（体力工作/每天运动）", "高度（高强度训练）"],
-    )
-    activity_factor = {"久坐（办公室/上课为主）": 1.2, "轻度（经常走动）": 1.375,
-                       "中度（体力工作/每天运动）": 1.55, "高度（高强度训练）": 1.725}[activity_label]
-    ex_type = st.selectbox("主要运动", list(MET.keys())[:-1])
-    ex_minutes = st.slider("每次时长（分钟）", 0, 120, 30, step=5)
-    ex_sessions = st.slider("每周次数", 0, 7, 3)
+    ACTIVITY_OPTIONS = ["久坐（办公室/上课为主）", "轻度（经常走动）",
+                        "中度（体力工作/每天运动）", "高度（高强度训练）"]
+    activity_label = st.selectbox("日常活动量", ACTIVITY_OPTIONS,
+                                  index=_pick(ACTIVITY_OPTIONS, "activity", ACTIVITY_OPTIONS[0]))
+    activity_factor = dict(zip(ACTIVITY_OPTIONS, [1.2, 1.375, 1.55, 1.725]))[activity_label]
+    ex_type = st.selectbox("主要运动", list(MET.keys()),
+                           index=_pick(list(MET.keys()), "ex_type", "快走"))
+    ex_minutes = st.slider("每次时长（分钟）", 0, 120, int(saved.get("ex_minutes", 30)), step=5)
+    ex_sessions = st.slider("每周次数", 0, 7, int(saved.get("ex_sessions", 3)))
 
     st.markdown('<div class="divider-line"></div>', unsafe_allow_html=True)
     with st.expander("🔑 API 设置"):
@@ -924,10 +1064,21 @@ with st.sidebar:
 profile = {
     "gender": gender, "age": age, "height": height, "weight": weight,
     "bmr": bmr, "bmi": bmi, "period": period, "exam": exam, "note": note,
+    "sleep_h": sleep_h, "water_ml": water_ml, "body_fat": body_fat,
+    "fasting_glu": fasting_glu, "supplements": supplements,
     "weight_loss": weight_loss, "muscle": muscle, "sugar_ctrl": sugar_ctrl,
     "anti_inflammatory": anti_inflammatory,
     "ex_type": ex_type, "ex_minutes": ex_minutes, "ex_sessions": ex_sessions,
 }
+save_profile({
+    "gender": gender, "age": age, "height": height, "weight": weight,
+    "period": period, "exam": exam, "note": note,
+    "sleep_h": sleep_h, "water_ml": water_ml, "body_fat": body_fat,
+    "fasting_glu": fasting_glu, "supplements": supplements,
+    "weight_loss": weight_loss, "muscle": muscle, "sugar_ctrl": sugar_ctrl,
+    "anti_inflammatory": anti_inflammatory, "activity": activity_label,
+    "ex_type": ex_type, "ex_minutes": ex_minutes, "ex_sessions": ex_sessions,
+})
 profile["protein_need"] = protein_target(profile)
 ex = exercise_plan(profile, activity_factor, ex_type, ex_minutes, ex_sessions)
 profile["target"] = ex["target"]
@@ -955,8 +1106,15 @@ def kb_summary():
 # --------------------------------------------------------------------------
 # 主界面
 # --------------------------------------------------------------------------
-st.title("🥗 您的专属营养助手")
-st.caption("真实文档检索 · 膳食评估 · 运动建议 · 应季食材")
+st.markdown(
+    """
+    <div class="hero">
+      <h1>🥗 您的专属营养助手</h1>
+      <p>真实文档检索 · 膳食评估 · 运动建议 · 应季食材</p>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
 
 tab_today, tab_train, tab_trend, tab_kb = st.tabs(
     ["📊 今日评估", "🏋️ 训练", "📈 7 天曲线", "📚 知识库"])
@@ -970,6 +1128,16 @@ with tab_today:
     lunch = c2.text_area("午餐", height=90, placeholder="例：米饭150g，鸡胸肉100g，西兰花150g")
     dinner = c3.text_area("晚餐", height=90, placeholder="例：红薯150g，鱼100g，菠菜100g")
     snack = st.text_input("加餐（可选）", placeholder="例：苹果1个，酸奶150g")
+
+    with st.expander("📏 不知道多少克？常见份量速查"):
+        st.markdown(
+            "- 一碗米饭 ≈ 150 g，一个馒头 ≈ 100 g\n"
+            "- 一个鸡蛋 ≈ 50 g，一杯牛奶 ≈ 250 ml\n"
+            "- 一盒酸奶 ≈ 150 g，一个苹果 ≈ 200 g\n"
+            "- 一份炒菜 ≈ 250 g（其中肉约 50-80 g）\n"
+            "- 一勺油 ≈ 10 g，一把坚果 ≈ 20 g"
+        )
+        st.caption("写成「一碗」「一份」「一个」也可以，程序会自动换算，不用精确到克。")
 
     do_eval = st.button("开始评估", type="primary", width="stretch")
 
@@ -1038,11 +1206,28 @@ with tab_today:
         if total["unknown"]:
             st.warning("这些内容在本地食材表里没找到，未计入本地估算：" + "、".join(total["unknown"]))
         m1, m2, m3, m4, m5 = st.columns(5)
-        m1.metric("健康分", f"{res['score']}")
-        m2.metric("估算热量", f"{total['kcal']:.0f}", f"{total['kcal'] - ex['target']:+.0f} vs 目标")
-        m3.metric("蛋白质", f"{total['p']:.0f} g", f"目标 {profile['protein_need']:.0f} g")
-        m4.metric("蔬菜", f"{total['veg_g']:.0f} g")
-        m5.metric("运动消耗/天", f"{ex['daily_avg']:.0f} kcal")
+        score_color = "#2F8F5B" if res["score"] >= 80 else ("#E8A33D" if res["score"] >= 60 else "#D96B6B")
+        metric_card(m1, "健康分", f"{res['score']}", "满分 100", score_color)
+        metric_card(m2, "估算热量", f"{total['kcal']:.0f}",
+                    f"{total['kcal'] - ex['target']:+.0f} kcal vs 目标", "#E8A33D")
+        metric_card(m3, "蛋白质", f"{total['p']:.0f} g",
+                    f"目标 {profile['protein_need']:.0f} g", "#4A90D9")
+        metric_card(m4, "蔬菜", f"{total['veg_g']:.0f} g", "建议 300 g 以上", "#4CB47F")
+        metric_card(m5, "运动消耗", f"{ex['daily_avg']:.0f}", "kcal / 天", "#8E7CC3")
+
+        p_prot = min(100.0, total["p"] / max(profile["protein_need"], 1) * 100)
+        p_veg = min(100.0, total["veg_g"] / 300 * 100)
+        st.markdown(
+            '<div style="display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-top:14px">'
+            f'<div><div class="prow"><span>蛋白质达成</span>'
+            f'<span>{total["p"]:.0f} / {profile["protein_need"]:.0f} g</span></div>'
+            f'<div class="pbar"><span style="width:{p_prot:.0f}%;background:#4A90D9"></span></div></div>'
+            f'<div><div class="prow"><span>蔬菜达成</span>'
+            f'<span>{total["veg_g"]:.0f} / 300 g</span></div>'
+            f'<div class="pbar"><span style="width:{p_veg:.0f}%;background:#4CB47F"></span></div></div>'
+            '</div>',
+            unsafe_allow_html=True,
+        )
         if res.get("ai_est"):
             st.caption(f"热量与三大营养素由 AI 按菜品估算；本地食材表估算 {res['local_kcal']:.0f} kcal，仅作对照。")
 
@@ -1123,6 +1308,7 @@ with tab_today:
 性别 {gender}｜年龄 {age}｜身高 {height}cm｜体重 {weight}kg
 BMI {bmi:.1f}｜BMR {bmr:.0f} kcal｜TDEE {ex['tdee']:.0f} kcal｜建议摄入 {ex['target']:.0f} kcal
 生理期 {period}｜考试周 {exam}｜备注：{note or '无'}
+睡眠 {profile['sleep_h']:.1f} 小时｜饮水 {profile['water_ml']} ml｜体脂率 {profile['body_fat']:.0f}%｜空腹血糖 {profile['fasting_glu']:.1f} mmol/L｜补剂 {'、'.join(profile['supplements']) or '无'}
 目标权重：减脂 {weight_loss}｜增肌 {muscle}｜控糖 {sugar_ctrl}｜抗炎 {anti_inflammatory}
 蛋白质目标：{profile['protein_need']:.0f} g/天
 
@@ -1210,12 +1396,19 @@ with tab_train:
             "duration": v.get("duration", 0),
             "actions": len(v.get("exercises", {})),
         } for k, v in rows])
+        end_t = datetime.now().date()
+        grid_t = pd.DataFrame({"date": [(end_t - timedelta(days=i)).isoformat()
+                                        for i in range(6, -1, -1)]})
+        df_train = grid_t.merge(df_train, on="date", how="left").fillna(
+            {"volume": 0, "duration": 0, "actions": 0})
+        df_train["date"] = pd.to_datetime(df_train["date"])
 
         st.markdown("#### 📊 最近 7 天训练")
         figv = go.Figure(go.Bar(x=df_train["date"], y=df_train["volume"],
                                 marker_color="#7fb3d5", name="训练容量"))
         figv.update_layout(height=280, title="训练容量（kg）",
                            margin=dict(l=10, r=10, t=40, b=10))
+        figv.update_xaxes(type="date", tickformat="%m-%d")
         st.plotly_chart(figv, width="stretch")
 
         c1, c2 = st.columns(2)
@@ -1224,16 +1417,20 @@ with tab_train:
                                     marker_color="#a8d5ba"))
             figd.update_layout(height=240, title="训练时长（分钟）",
                                margin=dict(l=10, r=10, t=40, b=10))
+            figd.update_xaxes(type="date", tickformat="%m-%d")
             st.plotly_chart(figd, width="stretch")
         with c2:
             figa = go.Figure(go.Bar(x=df_train["date"], y=df_train["actions"],
                                     marker_color="#f0c987"))
             figa.update_layout(height=240, title="动作数量",
                                margin=dict(l=10, r=10, t=40, b=10))
+            figa.update_xaxes(type="date", tickformat="%m-%d")
             st.plotly_chart(figa, width="stretch")
 
         st.caption(f"最近 7 天记录 {len(rows)} 次训练，合计容量 {df_train['volume'].sum():.0f} kg。")
-        show_train = df_train.rename(columns={
+        show_train = df_train.copy()
+        show_train["date"] = show_train["date"].dt.strftime("%Y-%m-%d")
+        show_train = show_train.rename(columns={
             "date": "日期", "volume": "容量(kg)", "duration": "时长(分钟)", "actions": "动作数"})
         st.dataframe(show_train, hide_index=True, width="stretch")
 
@@ -1246,14 +1443,23 @@ with tab_trend:
     else:
         rows = sorted(hist.values(), key=lambda r: r["date"])[-7:]
         df = pd.DataFrame(rows)
+        # 补齐最近 7 天，横轴连续；没记录的那天留空，避免折线连成假趋势
+        end = datetime.now().date()
+        grid = pd.DataFrame({"date": [(end - timedelta(days=i)).isoformat()
+                                      for i in range(6, -1, -1)]})
+        df = grid.merge(df, on="date", how="left")
+        df["date"] = pd.to_datetime(df["date"])
+
         fig = go.Figure()
         fig.add_trace(go.Scatter(x=df["date"], y=df["kcal"], mode="lines+markers",
-                                 name="摄入热量", line=dict(color="#2f8f5b", width=3)))
-        if "target" in df:
-            fig.add_trace(go.Scatter(x=df["date"], y=df["target"], mode="lines",
-                                     name="目标摄入", line=dict(color="#c9a227", dash="dash")))
+                                 name="摄入热量", connectgaps=False,
+                                 line=dict(color="#2f8f5b", width=3)))
+        fig.add_trace(go.Scatter(x=df["date"], y=df["target"], mode="lines",
+                                 name="目标摄入", connectgaps=False,
+                                 line=dict(color="#c9a227", dash="dash")))
         fig.update_layout(height=320, margin=dict(l=10, r=10, t=30, b=10),
                           legend=dict(orientation="h", yanchor="bottom", y=1.02))
+        fig.update_xaxes(type="date", tickformat="%m-%d")
         st.markdown("#### 热量摄入 vs 目标")
         st.plotly_chart(fig, width="stretch")
 
@@ -1262,14 +1468,19 @@ with tab_trend:
             fig2 = go.Figure(go.Bar(x=df["date"], y=df["protein"], marker_color="#8fc9a8"))
             fig2.update_layout(height=260, margin=dict(l=10, r=10, t=30, b=10),
                                title="蛋白质（g）")
+            fig2.update_xaxes(type="date", tickformat="%m-%d")
             st.plotly_chart(fig2, width="stretch")
         with c2:
             fig3 = go.Figure(go.Bar(x=df["date"], y=df["exercise_kcal"], marker_color="#f0c987"))
             fig3.update_layout(height=260, margin=dict(l=10, r=10, t=30, b=10),
                                title="运动消耗（kcal/天，估算）")
+            fig3.update_xaxes(type="date", tickformat="%m-%d")
             st.plotly_chart(fig3, width="stretch")
 
-        show = df[["date", "kcal", "target", "protein", "gl", "veg", "exercise_kcal", "score"]]
+        recorded = df.dropna(subset=["kcal"]).copy()
+        recorded["date"] = recorded["date"].dt.strftime("%Y-%m-%d")
+        show = recorded[["date", "kcal", "target", "protein", "gl", "veg",
+                         "exercise_kcal", "score"]]
         show.columns = ["日期", "热量", "目标", "蛋白质", "GL", "蔬菜(g)", "运动消耗", "健康分"]
         st.dataframe(show, hide_index=True, width="stretch")
 
@@ -1332,7 +1543,12 @@ with tab_kb:
         st.markdown(
             "1. 启动时读取 `pdf` 文件夹，逐页提取文字；\n"
             "2. 把每页切成约 700 字的片段；\n"
-            "3. 评估时用你的饮食描述去检索最相关的 6 段；\n"
-            "4. 只把这 6 段发给 AI，并让它标注页码。\n\n"
+            "3. 用本地向量模型 + 关键词混合打分，检索最相关的 8 段；\n"
+            "4. 只把这 8 段发给 AI，并让它标注页码。\n\n"
             "这样既不会超出模型上下文，也能让回答有据可查。"
         )
+
+st.markdown(
+    '<div class="footer">本工具仅提供饮食参考，不能替代医生或注册营养师的诊断与治疗。</div>',
+    unsafe_allow_html=True,
+)
