@@ -522,6 +522,8 @@ MET = {
     "快走": 3.5, "慢跑": 7.0, "跑步": 9.0, "骑行": 6.0, "游泳": 8.0,
     "跳绳": 12.0, "力量训练": 5.0, "瑜伽": 3.0, "八段锦": 3.0,
     "羽毛球": 5.5, "乒乓球": 4.0, "健身操": 6.0, "几乎不运动": 1.0,
+    "偶尔运动（类型不定）": 5.0,
+    "篮球": 6.5,
 }
 
 
@@ -703,25 +705,34 @@ def gap_advice(total, profile, ex):
     return tips[:3]
 
 
+def streak_days(history):
+    """连续记录了几天（含今天）。"""
+    d = date.today()
+    n = 0
+    while d.isoformat() in history:
+        n += 1
+        d -= timedelta(days=1)
+    return n
+
+
 def exercise_plan(profile, activity_factor, ex_type, minutes, sessions):
-    met = MET.get(ex_type, 3.5)
+    # 强度系数：同样 30 分钟，快走和冲刺的消耗差别很大
+    intensity_mult = {"轻松": 0.85, "适中": 1.0, "高强度": 1.2}.get(
+        profile.get("ex_intensity", "适中"), 1.0)
+    met = MET.get(ex_type, 3.5) * intensity_mult
     per_session = met * 3.5 * profile["weight"] / 200 * minutes
     weekly = per_session * sessions
     daily_avg = weekly / 7
-    tdee = profile["bmr"] * activity_factor + daily_avg
+    neat = profile["bmr"] * (activity_factor - 1)   # 日常活动（不含专门训练）
+    tdee = profile["bmr"] + neat + daily_avg
     deficit = profile["weight_loss"] / 100 * 500
     surplus = profile.get("muscle", 0) / 100 * 300
     floor = 1200 if profile["gender"] == "女" else 1500
-    target = max(tdee + surplus - deficit, floor, profile["bmr"] * 1.05)
+    # 下限取 BMR：低于基础代谢的缺口不安全，但也不能高到让"减脂"失效
+    target = max(tdee + surplus - deficit, floor, profile["bmr"])
 
     rows = []
-    if profile.get("ex_sessions", 0) == 0 or profile.get("ex_type") == "几乎不运动":
-        rows = [
-            ("日常步行", "6000 步", "每天", "不追求运动量，先把日常活动补起来"),
-            ("久坐提醒", "每小时起身 2-3 分钟", "学习/工作时", "减少久坐对代谢和腰背的影响"),
-            ("爬楼梯 / 快走", "10-15 分钟", "每天 1-2 次", "最容易坚持的入门活动"),
-        ]
-    elif profile["period"] == "经期中":
+    if profile["period"] == "经期中":
         rows = [
             ("散步 / 拉伸", "20-30 分钟", "每天", "经期以低强度为主，缓解腹部不适"),
             ("瑜伽（阴瑜伽/修复）", "20 分钟", "3-4 次/周", "避免倒立和高强度跳跃"),
@@ -732,6 +743,19 @@ def exercise_plan(profile, activity_factor, ex_type, minutes, sessions):
             ("快走", "20 分钟", "每天", "提升专注力，缓解久坐"),
             ("跳绳间歇", "10 分钟（40秒跳+20秒歇）", "3 次/周", "时间短、心率提升快"),
             ("睡前拉伸", "10 分钟", "每天", "改善睡眠质量"),
+        ]
+    elif profile.get("ex_sessions", 0) == 0 or profile.get("ex_type") == "几乎不运动":
+        rows = [
+            ("日常步行", "6000 步", "每天", "不追求运动量，先把日常活动补起来"),
+            ("久坐提醒", "每小时起身 2-3 分钟", "学习/工作时", "减少久坐对代谢和腰背的影响"),
+            ("爬楼梯 / 快走", "10-15 分钟", "每天 1-2 次", "最容易坚持的入门活动"),
+        ]
+    elif profile.get("ex_sessions", 0) <= 2:
+        rows = [
+            ("喜欢的运动（球类 / 游泳 / 骑行）", "30-40 分钟", "每周 1-2 次",
+             "偶尔动也比不动好，选你愿意去的"),
+            ("快走或爬楼梯", "15-20 分钟", "每周 2-3 次", "低门槛，随手把日常活动补上"),
+            ("拉伸 / 散步", "10 分钟", "每天", "久坐人群优先放松髋和肩颈"),
         ]
     else:
         if profile.get("muscle", 0) >= 50:
@@ -751,6 +775,13 @@ def exercise_plan(profile, activity_factor, ex_type, minutes, sessions):
         rows.append(("拉伸 / 泡沫轴放松", "10 分钟", "每天", "减少训练后的炎症反应"))
 
     return {
+        "bmr": profile["bmr"],
+        "neat": neat,
+        "train": daily_avg,
+        "base_tdee": profile["bmr"] + neat,   # 不含专门训练
+        "deficit": deficit,
+        "surplus": surplus,
+        "floor": floor,
         "per_session": per_session,
         "weekly": weekly,
         "daily_avg": daily_avg,
@@ -1231,6 +1262,32 @@ def last_exercise_stats(training, name, skip_date=None):
     return None, None
 
 
+CARDIO_OPTIONS = ["篮球", "羽毛球", "跑步", "游泳", "骑行", "跳绳", "快走", "乒乓球", "其他"]
+
+
+def cardio_kcal(name, minutes, intensity, weight):
+    """单次有氧/球类运动的消耗（MET × 体重 × 时长）。"""
+    mult = {"轻松": 0.85, "适中": 1.0, "高强度": 1.2}.get(intensity, 1.0)
+    met = MET.get(name, 5.5) * mult
+    return met * 3.5 * weight / 200 * minutes
+
+
+def day_exercise(training, day, weight):
+    """某一天记录的运动：返回 (总消耗, 明细)。"""
+    rec = training.get(day) or {}
+    items = []
+    for c in rec.get("cardio", []):
+        items.append({"type": c.get("type", "运动"),
+                      "minutes": int(c.get("minutes", 0)),
+                      "kcal": round(float(c.get("kcal", 0)))})
+    if rec.get("exercises"):
+        minutes = float(rec.get("duration", 0) or 0)
+        if minutes > 0:
+            k = 5 * 3.5 * weight / 200 * minutes   # 力量训练按 MET 5 估算
+            items.append({"type": "力量训练", "minutes": int(minutes), "kcal": round(k)})
+    return sum(i["kcal"] for i in items), items
+
+
 # --------------------------------------------------------------------------
 # 侧边栏
 # --------------------------------------------------------------------------
@@ -1301,13 +1358,15 @@ with st.sidebar:
 
     st.markdown('<div class="divider-line"></div>', unsafe_allow_html=True)
     st.header("🏃 运动情况")
-    ACTIVITY_OPTIONS = ["久坐（办公室/上课为主）", "轻度（经常走动）",
-                        "中度（体力工作/每天运动）", "高度（高强度训练）"]
+    ACTIVITY_OPTIONS = ["久坐（几乎不活动）", "轻度（日常走动，不专门训练）",
+                        "中度（体力工作 / 经常走动）", "高度（重体力劳动）"]
     activity_label = st.selectbox("日常活动量", ACTIVITY_OPTIONS,
                                   index=_pick(ACTIVITY_OPTIONS, "activity", ACTIVITY_OPTIONS[0]))
-    activity_factor = dict(zip(ACTIVITY_OPTIONS, [1.2, 1.375, 1.55, 1.725]))[activity_label]
+    # 这几个系数只代表"日常生活"，专门训练单独算，避免重复计数
+    activity_factor = dict(zip(ACTIVITY_OPTIONS, [1.2, 1.3, 1.42, 1.55]))[activity_label]
     ex_type = st.selectbox("主要运动", list(MET.keys()),
                            index=_pick(list(MET.keys()), "ex_type", "快走"))
+    ex_intensity = st.selectbox("训练强度", ["轻松", "适中", "高强度"], index=1)
     ex_minutes = st.slider("每次时长（分钟）", 0, 120, int(saved.get("ex_minutes", 30)), step=5)
     ex_sessions = st.slider("每周次数", 0, 7, int(saved.get("ex_sessions", 3)))
 
@@ -1326,7 +1385,8 @@ profile = {
     "fasting_glu": fasting_glu, "supplements": supplements,
     "weight_loss": weight_loss, "muscle": muscle, "sugar_ctrl": sugar_ctrl,
     "anti_inflammatory": anti_inflammatory,
-    "ex_type": ex_type, "ex_minutes": ex_minutes, "ex_sessions": ex_sessions,
+    "ex_type": ex_type, "ex_intensity": ex_intensity,
+    "ex_minutes": ex_minutes, "ex_sessions": ex_sessions,
 }
 save_profile({
     "gender": gender, "age": age, "height": height, "weight": weight,
@@ -1335,7 +1395,8 @@ save_profile({
     "fasting_glu": fasting_glu, "supplements": supplements,
     "weight_loss": weight_loss, "muscle": muscle, "sugar_ctrl": sugar_ctrl,
     "anti_inflammatory": anti_inflammatory, "activity": activity_label,
-    "ex_type": ex_type, "ex_minutes": ex_minutes, "ex_sessions": ex_sessions,
+    "ex_type": ex_type, "ex_intensity": ex_intensity,
+    "ex_minutes": ex_minutes, "ex_sessions": ex_sessions,
 })
 profile["protein_need"] = protein_target(profile)
 ex = exercise_plan(profile, activity_factor, ex_type, ex_minutes, ex_sessions)
@@ -1373,7 +1434,7 @@ st.markdown(
         <div class="chips">
           <span class="chip">🎯 今日目标 {ex['target']:.0f} kcal</span>
           <span class="chip">🥩 蛋白质 {profile['protein_need']:.0f} g</span>
-          <span class="chip">📅 已记录 {len(st.session_state.history)} 天</span>
+          <span class="chip">🔥 连续 {streak_days(st.session_state.history)} 天 · 共记录 {len(st.session_state.history)} 天</span>
         </div>
       </div>
       <div class="hero-art">🥗</div>
@@ -1420,6 +1481,32 @@ with tab_today:
         for _k in ("bf", "lunch", "dinner", "snack"):
             st.session_state[f"meal_{_k}"] = ""
 
+    CANTEEN_QUICK = ["米饭", "馒头", "小笼包", "包子", "热干面", "牛肉面", "鸭血粉丝汤",
+                     "黄焖鸡米饭", "番茄炒蛋", "青椒肉丝", "鱼香肉丝", "宫保鸡丁", "回锅肉",
+                     "麻婆豆腐", "酸辣土豆丝", "干锅花菜", "炒青菜", "清炒西兰花",
+                     "红烧排骨", "糖醋里脊", "小炒黄牛肉", "清蒸鱼", "白切鸡", "水煮鱼",
+                     "麻辣香锅", "椒麻鸡", "番茄蛋汤", "紫菜蛋花汤"]
+    _KEY_MAP = {"早餐": "bf", "午餐": "lunch", "晚餐": "dinner", "加餐": "snack"}
+
+    def _add_quick():
+        _dishes = st.session_state.get("quick_dishes") or []
+        if not _dishes:
+            return
+        _k = _KEY_MAP.get(st.session_state.get("quick_meal", "午餐"), "lunch")
+        _text = "，".join(f"{d}{st.session_state.get('quick_portion', '一份')}" for d in _dishes)
+        _cur = st.session_state.get(f"meal_{_k}", "")
+        st.session_state[f"meal_{_k}"] = (_cur + "，" + _text) if _cur else _text
+        st.session_state["quick_msg"] = _text
+
+    with st.expander("🍱 食堂点菜（不想打字就点这里）"):
+        q1, q2, q3 = st.columns([2.4, 1, 1])
+        q1.multiselect("选菜（可多选）", CANTEEN_QUICK, key="quick_dishes")
+        q2.selectbox("加到", list(_KEY_MAP), key="quick_meal")
+        q3.selectbox("份量", ["一份", "半份", "两份"], key="quick_portion")
+        st.button("加入这一餐", key="quick_add", on_click=_add_quick)
+        if st.session_state.get("quick_msg"):
+            st.success("已加入：" + st.session_state.pop("quick_msg"))
+
     c1, c2, c3 = st.columns(3)
     breakfast = c1.text_area("早餐", height=90, key="meal_bf",
                              placeholder="例：燕麦40g，牛奶250ml，鸡蛋1个")
@@ -1448,6 +1535,15 @@ with tab_today:
         ests = [estimate_meal(v) for v in meals.values()]
         total = merge_estimates(ests)
         local_kcal = total["kcal"]
+        # 如果今天记录了一次临时运动，用当天实际消耗替代周平均
+        _today_burn, _today_items = day_exercise(
+            st.session_state.training, date.today().isoformat(), weight)
+        ex_view = dict(ex)
+        if _today_items:
+            ex_view["tdee"] = ex["base_tdee"] + _today_burn
+            ex_view["train"] = _today_burn
+            ex_view["target"] = max(ex_view["tdee"] + ex["surplus"] - ex["deficit"],
+                                    ex["floor"], profile["bmr"])
         query = " ".join([v for v in meals.values() if v]) + f" 减脂 控糖 蛋白质 {period} {note}"
         sources = retrieve(index, chunks, query, k=8)
         kb_note = kb_summary()
@@ -1486,8 +1582,8 @@ with tab_today:
             "fat": round(total["f"], 1),
             "gl": round(total["gl"], 1),
             "veg": round(total["veg_g"]),
-            "exercise_kcal": round(ex["daily_avg"]),
-            "target": round(ex["target"]),
+            "exercise_kcal": round(ex_view["train"]),
+            "target": round(ex_view["target"]),
             "meals": meals,
             "score": score,
         }
@@ -1499,11 +1595,13 @@ with tab_today:
             "sources": sources, "ai_text": strip_estimate(ai_text) if ai_text else None,
             "ai_error": ai_error, "saved": saved, "kb_note": kb_note,
             "ai_est": bool(ai_est), "local_kcal": local_kcal,
+            "ex": ex_view, "today_burn": _today_burn, "today_items": _today_items,
         }
 
     res = st.session_state.last_result
     if res:
         total = res["total"]
+        ex = res.get("ex", ex)
         st.markdown('<div class="divider-line"></div>', unsafe_allow_html=True)
         if total["unknown"]:
             st.warning("这些内容在本地食材表里没找到，未计入本地估算：" + "、".join(total["unknown"]))
@@ -1513,12 +1611,14 @@ with tab_today:
             f'<div class="ring-box">{score_ring(res["score"], score_color)}</div>',
             unsafe_allow_html=True,
         )
-        metric_card(m1, "估算热量", f"{total['kcal']:.0f}",
-                    f"{total['kcal'] - ex['target']:+.0f} kcal vs 目标", "#E8A33D")
+        _lo, _hi = total["kcal"] * 0.9, total["kcal"] * 1.1
+        metric_card(m1, "估算热量", f"≈{total['kcal']:.0f}",
+                    f"区间 {_lo:.0f}–{_hi:.0f} · 目标 {ex['target']:.0f}", "#E8A33D")
         metric_card(m2, "蛋白质", f"{total['p']:.0f} g",
                     f"目标 {profile['protein_need']:.0f} g", "#4A90D9")
         metric_card(m3, "蔬菜", f"{total['veg_g']:.0f} g", "建议 300 g 以上", "#4CB47F")
-        metric_card(m4, "运动消耗", f"{ex['daily_avg']:.0f}", "kcal / 天", "#8E7CC3")
+        metric_card(m4, "日均总消耗", f"{ex['tdee']:.0f}",
+                    f"训练 {ex['train']:.0f} · 日常 {ex['neat']:.0f}", "#8E7CC3")
 
         p_prot = min(100.0, total["p"] / max(profile["protein_need"], 1) * 100)
         p_veg = min(100.0, total["veg_g"] / 300 * 100)
@@ -1533,6 +1633,8 @@ with tab_today:
             '</div>',
             unsafe_allow_html=True,
         )
+        st.caption("热量与营养素为估算值，食堂菜品的油盐差异可达 ±20%；"
+                   "看一周的趋势比盯单日数字更可靠。")
         if res.get("ai_est"):
             st.caption(f"热量与三大营养素由 AI 按菜品估算；本地食材表估算 {res['local_kcal']:.0f} kcal，仅作对照。")
 
@@ -1541,6 +1643,10 @@ with tab_today:
                 st.caption("✅ 已记录到本次会话（云端不写入共享文件，关闭页面后清空）")
             else:
                 st.caption(f"✅ 已保存 {date.today().isoformat()} 的记录（当天重复评估会覆盖）")
+        if res.get("today_items"):
+            st.caption("⚡ 今日运动已计入：" + "、".join(
+                f"{i['type']} {i['minutes']} 分钟（{i['kcal']} kcal）" for i in res["today_items"])
+                + f"，合计 {res['today_burn']} kcal。今日目标按实际消耗计算。")
 
         st.markdown("#### 🎯 今天还差什么")
         _gcols = st.columns(3)
@@ -1603,9 +1709,11 @@ with tab_today:
                         st.caption("未识别：" + "、".join(total["unknown"]))
 
         st.markdown("#### 🏃 今日运动建议")
-        st.caption(f"{ex_type} 每次约消耗 {ex['per_session']:.0f} kcal；"
-                   f"每周合计 {ex['weekly']:.0f} kcal，折合每天 {ex['daily_avg']:.0f} kcal。"
-                   f"TDEE ≈ {ex['tdee']:.0f} kcal，建议摄入 {ex['target']:.0f} kcal。")
+        st.caption(f"{ex_type}（{profile['ex_intensity']}）每次约 {ex['per_session']:.0f} kcal，"
+                   f"每周 {ex['weekly']:.0f} kcal，折合每天 {ex['train']:.0f} kcal。")
+        st.caption(f"每日消耗 = 基础代谢 {ex['bmr']:.0f} + 日常活动 {ex['neat']:.0f} + "
+                   f"训练 {ex['train']:.0f} = {ex['tdee']:.0f} kcal；"
+                   f"建议摄入 {ex['target']:.0f} kcal（已按目标调整）。")
         plan_df = pd.DataFrame(ex["rows"], columns=["项目", "时长", "频率", "为什么"])
         st.dataframe(plan_df, hide_index=True, width="stretch")
 
@@ -1684,6 +1792,30 @@ with tab_train:
     t_duration = c2.slider("训练时长（分钟）", 0, 180, 45, step=5)
     t_feel = c3.selectbox("训练感受", ["轻松", "适中", "力竭"], index=1)
 
+    with st.container(border=True):
+        st.markdown("##### ⚡ 临时运动（今天突然动了一次）")
+        ck1, ck2, ck3 = st.columns([1.2, 1, 1])
+        ck_type = ck1.selectbox("项目", CARDIO_OPTIONS, key="cardio_type")
+        ck_min = ck2.slider("时长（分钟）", 0, 180, 45, step=5, key="cardio_min")
+        ck_int = ck3.selectbox("强度", ["轻松", "适中", "高强度"], index=1, key="cardio_int")
+        _est = cardio_kcal(ck_type, ck_min, ck_int, weight)
+        st.caption(f"预计消耗约 {_est:.0f} kcal（按 MET × 体重 × 时长估算）")
+        if st.button("记录这次运动", key="save_cardio"):
+            _day = t_date.isoformat()
+            _rec = st.session_state.training.setdefault(
+                _day, {"exercises": {}, "volume": 0, "duration": 0, "feel": "适中"})
+            _now = datetime.now().strftime("%Y-%m-%d %H:%M")
+            _last = (_rec.get("cardio") or [{}])[-1]
+            if (_last.get("type") == ck_type and _last.get("minutes") == int(ck_min)
+                    and str(_last.get("ts", ""))[:16] == _now):
+                st.info("刚刚已经记过一次了，换个时长或项目再记")
+            else:
+                _rec.setdefault("cardio", []).append({
+                    "type": ck_type, "minutes": int(ck_min), "intensity": ck_int,
+                    "kcal": round(_est), "ts": _now})
+                if save_training(st.session_state.training):
+                    st.success(f"已记录：{ck_type} {ck_min} 分钟，约 {_est:.0f} kcal")
+
     picked = st.multiselect(
         "今天练了哪些动作", EXERCISES,
         default=[] if muscle < 50 else ["深蹲", "卧推", "划船"],
@@ -1718,11 +1850,18 @@ with tab_train:
         if not picked:
             st.warning("先选至少一个动作")
         else:
-            rec = {"duration": int(t_duration), "feel": t_feel,
-                   "exercises": details, "volume": round(volume, 1)}
-            st.session_state.training[t_date.isoformat()] = rec
+            _day = t_date.isoformat()
+            _rec = st.session_state.training.setdefault(_day, {})
+            _rec.update({"duration": int(t_duration), "feel": t_feel,
+                         "exercises": details, "volume": round(volume, 1)})
             if save_training(st.session_state.training):
                 st.success(f"已保存 {t_date} 的训练：{len(details)} 个动作，容量 {volume:.0f} kg")
+
+    _burn, _items = day_exercise(st.session_state.training, t_date.isoformat(), weight)
+    if _items:
+        st.caption("今天已记录：" + "、".join(
+            f"{i['type']} {i['minutes']} 分钟（约 {i['kcal']} kcal）" for i in _items)
+            + f"　合计 {_burn} kcal")
 
     st.markdown('<div class="divider-line"></div>', unsafe_allow_html=True)
     train = st.session_state.training
