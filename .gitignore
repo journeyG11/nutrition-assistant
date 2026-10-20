@@ -1,0 +1,8 @@
+__pycache__/
+.env
+nutrition_history.json
+training_history.json
+profile.json
+.fastembed/
+.emb_cache_*.npz
+*.pyc
