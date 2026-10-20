@@ -133,9 +133,18 @@ CSS = """
         .tag {background: rgba(47,143,91,0.28);}
         .hero {background: linear-gradient(120deg, rgba(47,143,91,0.22), rgba(73,179,125,0.08));}
     }
+    /* 手机上让图表不抢手势，页面可以正常上下滑动 */
+    @media (max-width: 640px) {
+        div[data-testid="stPlotlyChart"] {pointer-events: none; touch-action: pan-y;}
+        .stTabs [data-baseweb="tab-list"] {flex-wrap: wrap;}
+    }
 </style>
 """
 st.markdown(CSS, unsafe_allow_html=True)
+
+# 图表交互配置：关掉滚轮缩放和拖拽，避免手机上滑不动页面
+PLOTLY_CONFIG = {"displayModeBar": False, "scrollZoom": False,
+                 "dragmode": False, "doubleClick": "reset"}
 
 
 def metric_card(col, label, value, sub="", color="#2F8F5B"):
@@ -263,8 +272,84 @@ FOODS = [
     _f("火锅", 180, 8.0, 8.0, 12.0, 4, 2, ["all"], 500, "份"),
 ]
 
-FOOD_INDEX = {f["name"]: f for f in FOODS}
-ALIASES = {f["name"]: f["name"] for f in FOODS}
+DATA_CANDIDATES = [APP_DIR / "foods_cn.json",
+                   APP_DIR / "data" / "foods_cn.json",
+                   APP_DIR / "pdf" / "foods_cn.json"]
+
+
+def load_food_data():
+    """加载《中国食物成分表》转换后的扩展库（1600+ 条），缺文件时只用手写库。"""
+    path = next((p for p in DATA_CANDIDATES if p.exists()), None)
+    if path is None:
+        return []
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    out = []
+    for it in raw:
+        name = str(it.get("name", "")).strip()
+        if len(name) < 2:
+            continue
+        out.append({
+            "name": name,
+            "kcal": float(it.get("kcal", 0)),
+            "p": float(it.get("p", 0)),
+            "c": float(it.get("c", 0)),
+            "f": float(it.get("f", 0)),
+            "gl": float(it.get("gl", 0)),
+            "anti": int(it.get("anti", 5)),
+            "seasons": ["all"],
+            "unit_g": 100,
+            "unit": "份",
+            "tags": (),
+        })
+    return out
+
+
+DATA_FOODS = load_food_data()
+
+DISH_CANDIDATES = [APP_DIR / "dishes_cn.json",
+                   APP_DIR / "data" / "dishes_cn.json",
+                   APP_DIR / "pdf" / "dishes_cn.json"]
+
+
+def load_dishes():
+    """加载菜品库（133 道常见菜），按「一份」估算。"""
+    path = next((p for p in DISH_CANDIDATES if p.exists()), None)
+    if path is None:
+        return []
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    out = []
+    for it in raw:
+        name = str(it.get("name", "")).strip()
+        if len(name) < 2:
+            continue
+        out.append({
+            "name": name,
+            "kcal": float(it.get("kcal", 0)),
+            "p": float(it.get("p", 0)),
+            "c": float(it.get("c", 0)),
+            "f": float(it.get("f", 0)),
+            "gl": float(it.get("c", 0)) * 0.6,
+            "anti": int(it.get("anti", 5)),
+            "seasons": ["all"],
+            "unit_g": float(it.get("serving_g", 100)),
+            "unit": "份",
+            "tags": (),
+        })
+    return out
+
+
+DISH_FOODS = load_dishes()
+FOOD_INDEX = {}
+for _food in DATA_FOODS + DISH_FOODS + FOODS:   # 手写库放最后，同名时优先级最高
+    FOOD_INDEX[_food["name"]] = _food
+
+ALIASES = {name: name for name in FOOD_INDEX}
 ALIASES.update({
     "白米饭": "米饭", "米饭": "米饭",
     "鸡胸": "鸡胸肉", "鸡胸肉": "鸡胸肉",
@@ -283,10 +368,81 @@ ALIASES.update({
     "坚果": "核桃", "核桃": "核桃",
     "鱼": "鱼", "三文鱼": "三文鱼",
     "西蓝花": "西兰花", "花生米": "花生", "炒鸡蛋": "鸡蛋",
-    "煎蛋": "鸡蛋", "水煮鱼": "鱼", "清蒸鱼": "鱼",
+    "煎蛋": "鸡蛋",
 })
-# 长词优先匹配，避免"全麦面包"被"面包"抢先
+
+# 数据集里常带括号/方括号说明（如「鲈鱼［鲈花］」「西兰花（绿菜花）」），
+# 去掉括号得到本名，括号里用顿号分隔的别名也一并登记
+for _name in list(FOOD_INDEX):
+    _base = re.split(r"[（(［\[]", _name)[0].strip()
+    if len(_base) >= 2 and _base not in FOOD_INDEX and _base not in ALIASES:
+        ALIASES[_base] = _name
+    _m = re.search(r"[（(［\[](.*?)[）)］\]]", _name)
+    if _m:
+        for _alias in re.split(r"[、,，]", _m.group(1)):
+            _alias = _alias.strip()
+            if len(_alias) >= 2 and _alias not in FOOD_INDEX:
+                ALIASES.setdefault(_alias, _name)
+
+# 长词优先匹配，避免"全麦面包"被"面包"抢先；合并成一个正则，速度快很多
 ALIAS_KEYS = sorted(ALIASES.keys(), key=len, reverse=True)
+FOOD_PATTERN = re.compile("|".join(re.escape(k) for k in ALIAS_KEYS))
+
+# --------------------------------------------------------------------------
+# 补剂库：常见剂量、服用时间、注意事项
+# --------------------------------------------------------------------------
+SUPP_CANDIDATES = [APP_DIR / "supplements_cn.json",
+                   APP_DIR / "data" / "supplements_cn.json",
+                   APP_DIR / "pdf" / "supplements_cn.json"]
+DEFAULT_SUPPLEMENTS = ["乳清蛋白粉", "维生素D3", "铁剂", "钙片",
+                       "鱼油（Omega-3）", "复合维生素", "肌酸（一水肌酸）"]
+
+
+def load_supplements():
+    path = next((p for p in SUPP_CANDIDATES if p.exists()), None)
+    if path is not None:
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+            db = {d["name"]: d for d in data if d.get("name")}
+            if db:
+                return db
+        except Exception:
+            pass
+    return {n: {"name": n, "dose": "", "timing": "", "note": "", "caution": "", "tags": []}
+            for n in DEFAULT_SUPPLEMENTS}
+
+
+SUPP_DB = load_supplements()
+
+
+def supplement_tips(selected, profile):
+    """根据所选补剂给出搭配和使用提示（通用信息，不构成医学建议）。"""
+    s = set(selected)
+    tips = []
+    if "钙片" in s and ("铁剂" in s or "铁+叶酸复合" in s):
+        tips.append("钙和铁同服会互相影响吸收，建议间隔 2 小时")
+    if "钙片" in s and "锌" in s:
+        tips.append("钙和锌有吸收竞争，建议错开服用")
+    if ("铁剂" in s or "铁+叶酸复合" in s) and "维生素C" in s:
+        tips.append("维生素C 能促进铁吸收，可以一起吃")
+    if "铁剂" in s or "铁+叶酸复合" in s:
+        tips.append("铁剂避免与茶、咖啡同服，间隔 1-2 小时")
+    if "锌" in s and "铁剂" in s:
+        tips.append("锌和铁同服会竞争吸收，建议分开")
+    if "褪黑素" in s:
+        tips.append("褪黑素睡前 30-60 分钟服用，服后不要开车")
+    if "咖啡因" in s and profile.get("sleep_h", 7) < 7:
+        tips.append("你睡眠偏少，咖啡因建议只在上午，下午后不要再摄入")
+    if "肌酸（一水肌酸）" in s:
+        tips.append("补肌酸期间每天饮水 1.5-2 L")
+    if {"乳清蛋白粉", "大豆蛋白粉", "增肌粉"} & s:
+        tips.append("蛋白粉要计入当日蛋白质总量，别只算三餐")
+    if "益生菌" in s:
+        tips.append("益生菌与抗生素间隔 2 小时，水温低于 40℃")
+    if "鱼油（Omega-3）" in s:
+        tips.append("鱼油与抗凝药同用前请先咨询医生")
+    return tips
+
 
 SEASON_CN = {"spring": "春", "summer": "夏", "autumn": "秋", "winter": "冬"}
 SEASON_MAP = {"春季": "spring", "夏季": "summer", "秋季": "autumn", "冬季": "winter"}
@@ -359,24 +515,24 @@ def estimate_meal(text):
         return result
 
     taken = []
-    for key in ALIAS_KEYS:
-        for m in re.finditer(re.escape(key), text):
-            if any(a <= m.start() < b for a, b in taken):
-                continue
-            taken.append((m.start(), m.end()))
-            food = FOOD_INDEX[ALIASES[key]]
-            grams = _grams_after(text, m.end(), food)
-            ratio = grams / 100.0
-            result["kcal"] += food["kcal"] * ratio
-            result["p"] += food["p"] * ratio
-            result["c"] += food["c"] * ratio
-            result["f"] += food["f"] * ratio
-            result["gl"] += food["gl"] * ratio
-            if food["name"] in VEG_NAMES:
-                result["veg_g"] += grams
-            result["veg_g"] += DISH_VEG.get(food["name"], 0)
-            result["items"].append({"name": food["name"], "grams": round(grams),
-                                    "kcal": round(food["kcal"] * ratio)})
+    for m in FOOD_PATTERN.finditer(text):
+        key = m.group(0)
+        if any(a <= m.start() < b for a, b in taken):
+            continue
+        taken.append((m.start(), m.end()))
+        food = FOOD_INDEX[ALIASES[key]]
+        grams = _grams_after(text, m.end(), food)
+        ratio = grams / 100.0
+        result["kcal"] += food["kcal"] * ratio
+        result["p"] += food["p"] * ratio
+        result["c"] += food["c"] * ratio
+        result["f"] += food["f"] * ratio
+        result["gl"] += food["gl"] * ratio
+        if food["name"] in VEG_NAMES:
+            result["veg_g"] += grams
+        result["veg_g"] += DISH_VEG.get(food["name"], 0)
+        result["items"].append({"name": food["name"], "grams": round(grams),
+                                "kcal": round(food["kcal"] * ratio)})
 
     # 没命中任何食材的片段（例如"辣椒炒肉一份"）单独列出，避免被悄悄当成 0
     leftovers = []
@@ -825,6 +981,10 @@ def build_prompt(profile, meals, total, ex, sources, kb_note, training=None):
     bf_txt = f"{profile['body_fat']:.0f}%" if profile.get("body_fat") else "未填"
     glu_txt = f"{profile['fasting_glu']:.1f} mmol/L" if profile.get("fasting_glu") else "未填"
     sup_txt = "、".join(profile.get("supplements") or []) or "无"
+    sup_detail = "；".join(
+        f"{n}（{SUPP_DB[n].get('dose', '')}，{SUPP_DB[n].get('timing', '')}）"
+        for n in (profile.get("supplements") or []) if n in SUPP_DB
+    ) or "无"
 
     return f"""
 你是专业营养师，请用中文、条理清晰地评估下面这一天的饮食。
@@ -835,6 +995,7 @@ def build_prompt(profile, meals, total, ex, sources, kb_note, training=None):
 身体状态：生理期 {profile['period']}，考试周 {profile['exam']}，备注：{profile['note'] or '无'}
 睡眠：{profile.get('sleep_h', 7):.1f} 小时/天；饮水：{profile.get('water_ml', 1500)} ml/天
 体脂率：{bf_txt}；空腹血糖：{glu_txt}；补剂：{sup_txt}
+补剂常见用法：{sup_detail}
 目标权重：减脂 {profile['weight_loss']}，增肌 {profile.get('muscle', 0)}，控糖 {profile['sugar_ctrl']}，抗炎 {profile['anti_inflammatory']}
 每日蛋白质目标：{profile['protein_need']:.0f} g（{profile['protein_need'] / profile['weight']:.1f} g/kg）
 
@@ -1033,9 +1194,10 @@ with st.sidebar:
                                    float(saved.get("body_fat", 0.0)), step=1.0)
         fasting_glu = st.number_input("空腹血糖 mmol/L（不知道填 0）", 0.0, 30.0,
                                       float(saved.get("fasting_glu", 0.0)), step=0.1)
-        supplements = st.multiselect("正在吃的补剂", ["蛋白粉", "维生素D", "铁剂", "钙片",
-                                              "鱼油", "复合维生素", "肌酸"],
-                                     default=saved.get("supplements", []))
+        _supp_default = [x for x in saved.get("supplements", []) if x in SUPP_DB]
+        supplements = st.multiselect("正在吃的补剂", list(SUPP_DB.keys()),
+                                     default=_supp_default,
+                                     help="选好后，评估结果里会给出服用时间和搭配提示")
 
     st.markdown('<div class="divider-line"></div>', unsafe_allow_html=True)
     st.header("🎯 营养目标权重")
@@ -1144,6 +1306,8 @@ with tab_today:
             "- 一勺油 ≈ 10 g，一把坚果 ≈ 20 g"
         )
         st.caption("写成「一碗」「一份」「一个」也可以，程序会自动换算，不用精确到克。")
+
+    st.caption(f"🍚 已收录 {len(FOOD_INDEX)} 种食物与菜品，写「椒麻鸡一份」也能直接识别。")
 
     do_eval = st.button("开始评估", type="primary", width="stretch")
 
@@ -1267,6 +1431,19 @@ with tab_today:
             else:
                 st.caption("未识别常见过敏原")
 
+            if profile["supplements"]:
+                st.markdown("**💊 补剂提示**")
+                _tips = supplement_tips(profile["supplements"], profile)
+                if _tips:
+                    for _t in _tips:
+                        st.markdown(f"- {_t}")
+                else:
+                    st.caption("所选补剂之间没有需要特别注意的搭配")
+                with st.expander("补剂常见用法"):
+                    for _n in profile["supplements"]:
+                        _d = SUPP_DB.get(_n, {})
+                        st.caption(f"{_n}：{_d.get('dose', '')}｜{_d.get('timing', '')}｜{_d.get('note', '')}")
+
             if total["items"]:
                 with st.expander("🍚 食材估算明细"):
                     df_items = pd.DataFrame(total["items"])
@@ -1317,6 +1494,13 @@ BMI {bmi:.1f}｜BMR {bmr:.0f} kcal｜TDEE {ex['tdee']:.0f} kcal｜建议摄入 {
 睡眠 {profile['sleep_h']:.1f} 小时｜饮水 {profile['water_ml']} ml｜体脂率 {profile['body_fat']:.0f}%｜空腹血糖 {profile['fasting_glu']:.1f} mmol/L｜补剂 {'、'.join(profile['supplements']) or '无'}
 目标权重：减脂 {weight_loss}｜增肌 {muscle}｜控糖 {sugar_ctrl}｜抗炎 {anti_inflammatory}
 蛋白质目标：{profile['protein_need']:.0f} g/天
+
+【补剂】
+""" + ("\n".join(
+            f"- {n}：{SUPP_DB[n].get('dose', '')}｜{SUPP_DB[n].get('timing', '')}｜{SUPP_DB[n].get('note', '')}"
+            for n in (profile["supplements"] or []) if n in SUPP_DB) or "- 无") + "\n" + (
+            "\n".join(f"- 提示：{t}" for t in supplement_tips(profile["supplements"], profile))
+            if profile["supplements"] else "") + f"""
 
 【今日饮食】
 """ + "\n".join(f"{k}：{v or '未填写'}" for k, v in res["meals"].items()) + f"""
@@ -1415,7 +1599,7 @@ with tab_train:
         figv.update_layout(height=280, title="训练容量（kg）",
                            margin=dict(l=10, r=10, t=40, b=10))
         figv.update_xaxes(type="date", tickformat="%m-%d")
-        st.plotly_chart(figv, width="stretch")
+        st.plotly_chart(figv, width="stretch", config=PLOTLY_CONFIG)
 
         c1, c2 = st.columns(2)
         with c1:
@@ -1424,14 +1608,14 @@ with tab_train:
             figd.update_layout(height=240, title="训练时长（分钟）",
                                margin=dict(l=10, r=10, t=40, b=10))
             figd.update_xaxes(type="date", tickformat="%m-%d")
-            st.plotly_chart(figd, width="stretch")
+            st.plotly_chart(figd, width="stretch", config=PLOTLY_CONFIG)
         with c2:
             figa = go.Figure(go.Bar(x=df_train["date"], y=df_train["actions"],
                                     marker_color="#f0c987"))
             figa.update_layout(height=240, title="动作数量",
                                margin=dict(l=10, r=10, t=40, b=10))
             figa.update_xaxes(type="date", tickformat="%m-%d")
-            st.plotly_chart(figa, width="stretch")
+            st.plotly_chart(figa, width="stretch", config=PLOTLY_CONFIG)
 
         st.caption(f"最近 7 天记录 {len(rows)} 次训练，合计容量 {df_train['volume'].sum():.0f} kg。")
         show_train = df_train.copy()
@@ -1467,7 +1651,7 @@ with tab_trend:
                           legend=dict(orientation="h", yanchor="bottom", y=1.02))
         fig.update_xaxes(type="date", tickformat="%m-%d")
         st.markdown("#### 热量摄入 vs 目标")
-        st.plotly_chart(fig, width="stretch")
+        st.plotly_chart(fig, width="stretch", config=PLOTLY_CONFIG)
 
         c1, c2 = st.columns(2)
         with c1:
@@ -1475,13 +1659,13 @@ with tab_trend:
             fig2.update_layout(height=260, margin=dict(l=10, r=10, t=30, b=10),
                                title="蛋白质（g）")
             fig2.update_xaxes(type="date", tickformat="%m-%d")
-            st.plotly_chart(fig2, width="stretch")
+            st.plotly_chart(fig2, width="stretch", config=PLOTLY_CONFIG)
         with c2:
             fig3 = go.Figure(go.Bar(x=df["date"], y=df["exercise_kcal"], marker_color="#f0c987"))
             fig3.update_layout(height=260, margin=dict(l=10, r=10, t=30, b=10),
                                title="运动消耗（kcal/天，估算）")
             fig3.update_xaxes(type="date", tickformat="%m-%d")
-            st.plotly_chart(fig3, width="stretch")
+            st.plotly_chart(fig3, width="stretch", config=PLOTLY_CONFIG)
 
         recorded = df.dropna(subset=["kcal"]).copy()
         recorded["date"] = recorded["date"].dt.strftime("%Y-%m-%d")
