@@ -412,6 +412,7 @@ def load_dishes():
             "anti": int(it.get("anti", 5)),
             "seasons": ["all"],
             "unit_g": float(it.get("serving_g", 100)),
+            "piece_g": float(it.get("piece_g", 0) or 0),
             "unit": "份",
             "tags": (),
         })
@@ -598,6 +599,10 @@ def _grams_after(text, pos, food):
     if s:
         raw = s.group(1)
         count = float(raw) if raw.isdigit() else CN_NUM.get(raw, 1)
+        unit = s.group(2)
+        # 「水饺 12 个」要按单个重量算，而不是 12 份
+        if unit in ("个", "片", "根", "块", "张") and food.get("piece_g"):
+            return food["piece_g"] * count
         return food["unit_g"] * count
     return food["unit_g"]
 
@@ -806,7 +811,10 @@ def exercise_plan(profile, activity_factor, ex_type, minutes, sessions):
         profile.get("ex_intensity", "适中"), 1.0)
     met = MET.get(ex_type, 3.5) * intensity_mult
     per_session = met * 3.5 * profile["weight"] / 200 * minutes
-    weekly = per_session * sessions
+    _t2 = profile.get("ex_type2", "几乎不运动")
+    _met2 = MET.get(_t2, 1.0) * (1.0 if _t2 == "几乎不运动" else intensity_mult)
+    per_session2 = _met2 * 3.5 * profile["weight"] / 200 * profile.get("ex_minutes2", 0)
+    weekly = per_session * sessions + per_session2 * profile.get("ex_sessions2", 0)
     daily_avg = weekly / 7
     neat = profile["bmr"] * (activity_factor - 1)   # 日常活动（不含专门训练）
     tdee = profile["bmr"] + neat + daily_avg
@@ -868,6 +876,7 @@ def exercise_plan(profile, activity_factor, ex_type, minutes, sessions):
         "surplus": surplus,
         "floor": floor,
         "per_session": per_session,
+        "per_session2": per_session2,
         "weekly": weekly,
         "daily_avg": daily_avg,
         "tdee": tdee,
@@ -1205,7 +1214,7 @@ def build_prompt(profile, meals, total, ex, sources, kb_note, training=None):
 未识别食材：{', '.join(total['unknown']) if total['unknown'] else '无'}
 
 【运动情况】
-运动类型：{profile['ex_type']}，每次 {profile['ex_minutes']} 分钟，每周 {profile['ex_sessions']} 次，约消耗 {ex['per_session']:.0f} kcal/次
+运动类型：{profile['ex_type']}，每次 {profile['ex_minutes']} 分钟，每周 {profile['ex_sessions']} 次，约消耗 {ex['per_session']:.0f} kcal/次{('；另有 ' + profile['ex_type2'] + ' 每次 ' + str(profile['ex_minutes2']) + ' 分钟、每周 ' + str(profile['ex_sessions2']) + ' 次') if profile.get('ex_sessions2', 0) > 0 and profile.get('ex_type2') != '几乎不运动' else ''}
 建议计划：
 {plan_txt}
 
@@ -1484,6 +1493,17 @@ with st.sidebar:
     ex_intensity = st.selectbox("训练强度", ["轻松", "适中", "高强度"], index=1)
     ex_minutes = st.slider("每次时长（分钟）", 0, 120, int(saved.get("ex_minutes", 30)), step=5)
     ex_sessions = st.slider("每周次数", 0, 7, int(saved.get("ex_sessions", 3)))
+    ex2_on = st.checkbox("还有第二种运动（比如快走 + 力量）",
+                         value=bool(saved.get("ex2_on", False)))
+    if ex2_on:
+        ex_type2 = st.selectbox("第二种运动", list(MET.keys()),
+                                index=_pick(list(MET.keys()), "ex_type2", "力量训练"))
+        ex_minutes2 = st.slider("第二种 · 每次时长（分钟）", 0, 120,
+                                int(saved.get("ex_minutes2", 30)), step=5, key="ex_min2")
+        ex_sessions2 = st.slider("第二种 · 每周次数", 0, 7,
+                                 int(saved.get("ex_sessions2", 2)), key="ex_ses2")
+    else:
+        ex_type2, ex_minutes2, ex_sessions2 = "几乎不运动", 0, 0
 
     st.markdown('<div class="divider-line"></div>', unsafe_allow_html=True)
     with st.expander("🔑 API 设置"):
@@ -1502,6 +1522,7 @@ profile = {
     "anti_inflammatory": anti_inflammatory,
     "ex_type": ex_type, "ex_intensity": ex_intensity,
     "ex_minutes": ex_minutes, "ex_sessions": ex_sessions,
+    "ex_type2": ex_type2, "ex_minutes2": ex_minutes2, "ex_sessions2": ex_sessions2,
 }
 save_profile({
     "gender": gender, "age": age, "height": height, "weight": weight,
@@ -1512,6 +1533,8 @@ save_profile({
     "anti_inflammatory": anti_inflammatory, "activity": activity_label,
     "ex_type": ex_type, "ex_intensity": ex_intensity,
     "ex_minutes": ex_minutes, "ex_sessions": ex_sessions,
+    "ex2_on": ex2_on, "ex_type2": ex_type2, "ex_minutes2": ex_minutes2,
+    "ex_sessions2": ex_sessions2,
 })
 profile["protein_need"] = protein_target(profile)
 ex = exercise_plan(profile, activity_factor, ex_type, ex_minutes, ex_sessions)
@@ -1843,19 +1866,24 @@ with tab_today:
                 with st.expander("🍚 食材估算明细"):
                     df_items = pd.DataFrame(total["items"])
                     df_items.columns = ["食材", "克数", "估算热量"]
-                    st.dataframe(df_items, hide_index=True, width="stretch")
+                    st.dataframe(df_items, hide_index=True, width="stretch", on_select="ignore")
                     if total["unknown"]:
                         st.caption("未识别：" + "、".join(total["unknown"]))
 
         st.markdown("#### 🏃 今日运动建议")
-        st.caption(f"{ex_type}（{profile['ex_intensity']}）每次约 {ex['per_session']:.0f} kcal，"
-                   f"每周 {ex['weekly']:.0f} kcal，折合每天 {ex['train']:.0f} kcal。")
+        if profile.get("ex_sessions2", 0) > 0 and profile.get("ex_type2", "几乎不运动") != "几乎不运动":
+            st.caption(f"{ex_type} 每次约 {ex['per_session']:.0f} kcal × 每周 {profile['ex_sessions']} 次，"
+                       f"{profile['ex_type2']} 每次约 {ex['per_session2']:.0f} kcal × 每周 {profile['ex_sessions2']} 次；"
+                       f"合计每周 {ex['weekly']:.0f} kcal，折合每天 {ex['train']:.0f} kcal。")
+        else:
+            st.caption(f"{ex_type}（{profile['ex_intensity']}）每次约 {ex['per_session']:.0f} kcal，"
+                       f"每周 {ex['weekly']:.0f} kcal，折合每天 {ex['train']:.0f} kcal。")
         st.caption("MET 取值来自《中国健康成年人身体活动能量消耗参考值》(T/CSSS)，强度系数为额外调整。")
         st.caption(f"每日消耗 = 基础代谢 {ex['bmr']:.0f} + 日常活动 {ex['neat']:.0f} + "
                    f"训练 {ex['train']:.0f} = {ex['tdee']:.0f} kcal；"
                    f"建议摄入 {ex['target']:.0f} kcal（已按目标调整）。")
         plan_df = pd.DataFrame(ex["rows"], columns=["项目", "时长", "频率", "为什么"])
-        st.dataframe(plan_df, hide_index=True, width="stretch")
+        st.dataframe(plan_df, hide_index=True, width="stretch", on_select="ignore")
 
         # 应季食材推荐
         cur_season = season_today()
@@ -1879,7 +1907,7 @@ with tab_today:
                 "抗炎评分": p["anti"], "GL": p["gl"],
                 "适合季节": "四季" if "all" in p["seasons"] else "、".join(SEASON_CN[s] for s in p["seasons"]),
             } for p in picks])
-            st.dataframe(rec, hide_index=True, width="stretch")
+            st.dataframe(rec, hide_index=True, width="stretch", on_select="ignore")
 
         # 导出报告
         report = f"""您的专属营养助手 · 膳食评估报告
@@ -2070,12 +2098,14 @@ with tab_train:
             st.plotly_chart(figa, width="stretch", config=PLOTLY_CONFIG)
 
         st.caption(f"最近 7 天记录 {len(rows)} 次训练，合计容量 {df_train['volume'].sum():.0f} kg。")
-        show_train = df_train.copy()
-        show_train["date"] = show_train["date"].dt.strftime("%Y-%m-%d")
+        # 表格只列有记录的日子，避免一堆 0 让人误以为当天没练
+        show_train = pd.DataFrame(_trows)
+        show_train["date"] = pd.to_datetime(show_train["date"]).dt.strftime("%Y-%m-%d")
+        show_train["volume"] = show_train["volume"].round(0).astype(int)
         show_train = show_train.rename(columns={
             "date": "日期", "volume": "容量(kg)", "duration": "时长(分钟)",
             "actions": "动作数", "rpe": "平均RPE"})
-        st.dataframe(show_train, hide_index=True, width="stretch")
+        st.dataframe(show_train, hide_index=True, width="stretch", on_select="ignore")
 
     st.markdown('<div class="divider-line"></div>', unsafe_allow_html=True)
     st.markdown("#### 🎯 本周各肌群组数")
@@ -2123,7 +2153,7 @@ with tab_train:
         {"周次": "第 4 周 · 减载", "推日": "2-3 组 × 8-10", "拉日": "2-3 组 × 8-10",
          "腿日": "2-3 组 × 8-10", "目标 RPE": "6"},
     ])
-    st.dataframe(_plan, hide_index=True, width="stretch")
+    st.dataframe(_plan, hide_index=True, width="stretch", on_select="ignore")
     st.caption("减载周不是偷懒：降低组数让恢复跟上，下一轮更容易进步。")
 
 
@@ -2176,7 +2206,7 @@ with tab_trend:
         show = recorded[["date", "kcal", "target", "protein", "gl", "veg",
                          "exercise_kcal", "score"]]
         show.columns = ["日期", "热量", "目标", "蛋白质", "GL", "蔬菜(g)", "运动消耗", "健康分"]
-        st.dataframe(show, hide_index=True, width="stretch")
+        st.dataframe(show, hide_index=True, width="stretch", on_select="ignore")
 
         if st.button("清空历史记录"):
             st.session_state.history = {}
