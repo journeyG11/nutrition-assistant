@@ -170,9 +170,10 @@ CSS = """
         .hero {background: linear-gradient(120deg, rgba(47,143,91,0.22), rgba(73,179,125,0.08));}
         .mcard, .ring-box {background-color: rgba(255,255,255,.06); border-color: rgba(255,255,255,.14);}
     }
-    /* 手机上让图表不抢手势，页面可以正常上下滑动 */
+    /* 图表只负责展示，不接收手势，避免手指一碰页面就跟着跑 */
+    div[data-testid="stPlotlyChart"] {pointer-events: none; touch-action: pan-y;}
+
     @media (max-width: 640px) {
-        div[data-testid="stPlotlyChart"] {pointer-events: none; touch-action: pan-y;}
         .stTabs [data-baseweb="tab-list"] {flex-wrap: wrap;}
         .hero-art {display: none;}
         .hero h1 {font-size: 1.55rem;}
@@ -2098,14 +2099,16 @@ with tab_train:
             st.plotly_chart(figa, width="stretch", config=PLOTLY_CONFIG)
 
         st.caption(f"最近 7 天记录 {len(rows)} 次训练，合计容量 {df_train['volume'].sum():.0f} kg。")
-        # 表格只列有记录的日子，避免一堆 0 让人误以为当天没练
-        show_train = pd.DataFrame(_trows)
-        show_train["date"] = pd.to_datetime(show_train["date"]).dt.strftime("%Y-%m-%d")
-        show_train["volume"] = show_train["volume"].round(0).astype(int)
-        show_train = show_train.rename(columns={
-            "date": "日期", "volume": "容量(kg)", "duration": "时长(分钟)",
-            "actions": "动作数", "rpe": "平均RPE"})
-        st.dataframe(show_train, hide_index=True, width="stretch", on_select="ignore")
+        # 用一行摘要代替可点选的表格，手机上不会误触
+        if _trows:
+            _total_vol = sum(r["volume"] or 0 for r in _trows)
+            _rpes = [r["rpe"] for r in _trows if r["rpe"]]
+            _line = f"最近 7 天训练 {len(_trows)} 次｜合计容量 {_total_vol:.0f} kg"
+            if _rpes:
+                _line += f"｜平均 RPE {sum(_rpes) / len(_rpes):.1f}"
+            st.caption(_line)
+            _last = _trows[-1]
+            st.caption(f"最近一次：{_last['date']}｜{int(_last['duration'])} 分钟｜{_last['actions']} 个动作")
 
     st.markdown('<div class="divider-line"></div>', unsafe_allow_html=True)
     st.markdown("#### 🎯 本周各肌群组数")
