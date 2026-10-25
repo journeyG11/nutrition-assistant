@@ -1956,22 +1956,19 @@ BMI {bmi:.1f}｜BMR {bmr:.0f} kcal｜TDEE {ex['tdee']:.0f} kcal｜建议摄入 {
 # ---------------------------- 训练记录 ----------------------------
 with tab_train:
     st.markdown("#### 🏋️ 今日训练记录")
-    c1, c2, c3 = st.columns(3)
-    t_date = c1.date_input("训练日期", value=date.today())
-    t_duration = c2.slider("训练时长（分钟）", 0, 180, 45, step=5)
-    t_feel = c3.selectbox("训练感受", ["轻松", "适中", "力竭"], index=1)
-    t_rest = st.slider("组间休息（秒）", 30, 240, 90, step=15)
-    st.caption("增肌常用 60-90 秒；深蹲、硬拉这类大重量复合动作可放到 2-3 分钟。")
+    t_date = st.date_input("训练日期", value=date.today())
 
     with st.container(border=True):
         st.markdown("##### ⚡ 临时运动（今天突然动了一次）")
-        ck1, ck2, ck3 = st.columns([1.2, 1, 1])
-        ck_type = ck1.selectbox("项目", CARDIO_OPTIONS, key="cardio_type")
-        ck_min = ck2.slider("时长（分钟）", 0, 180, 45, step=5, key="cardio_min")
-        ck_int = ck3.selectbox("强度", ["轻松", "适中", "高强度"], index=1, key="cardio_int")
-        _est = cardio_kcal(ck_type, ck_min, ck_int, weight)
-        st.caption(f"预计消耗约 {_est:.0f} kcal（按 MET × 体重 × 时长估算）")
-        if st.button("记录这次运动", key="save_cardio"):
+        with st.form("cardio_form"):
+            ck1, ck2, ck3 = st.columns([1.2, 1, 1])
+            ck_type = ck1.selectbox("项目", CARDIO_OPTIONS, key="cardio_type")
+            ck_min = ck2.slider("时长（分钟）", 0, 180, 45, step=5, key="cardio_min")
+            ck_int = ck3.selectbox("强度", ["轻松", "适中", "高强度"], index=1, key="cardio_int")
+            st.caption("滑完再点按钮才会记录，拖动时页面不会跳。")
+            ck_submit = st.form_submit_button("记录这次运动")
+        if ck_submit:
+            _est = cardio_kcal(ck_type, ck_min, ck_int, weight)
             _day = t_date.isoformat()
             _rec = st.session_state.training.setdefault(
                 _day, {"exercises": {}, "volume": 0, "duration": 0, "feel": "适中"})
@@ -2001,6 +1998,11 @@ with tab_train:
         default=[] if muscle < 50 else ["深蹲", "卧推", "划船"],
         key="train_picked",
     )
+    c1, c2, c3 = st.columns(3)
+    t_duration = c1.slider("训练时长（分钟）", 0, 180, 45, step=5)
+    t_feel = c2.selectbox("训练感受", ["轻松", "适中", "力竭"], index=1)
+    t_rest = c3.slider("组间休息（秒）", 30, 240, 90, step=15)
+    st.caption("增肌常用 60-90 秒；深蹲、硬拉这类大重量复合动作可放到 2-3 分钟。")
     details = {}
     if picked:
         st.caption("重量填 0 表示自重动作（俯卧撑、引体向上等）")
@@ -2075,28 +2077,16 @@ with tab_train:
         df_train["date"] = pd.to_datetime(df_train["date"])
 
         st.markdown("#### 📊 最近 7 天训练")
-        figv = go.Figure(go.Bar(x=df_train["date"], y=df_train["volume"],
-                                marker_color="#7fb3d5", name="训练容量"))
-        figv.update_layout(height=280, title="训练容量（kg）",
-                           margin=dict(l=10, r=10, t=40, b=10))
-        figv.update_xaxes(type="date", tickformat="%m-%d")
-        st.plotly_chart(figv, width="stretch", config=PLOTLY_CONFIG)
-
+        _chart_df = df_train.set_index("date")
+        st.caption("训练容量（kg）")
+        st.bar_chart(_chart_df["volume"], height=220, color="#7fb3d5")
         c1, c2 = st.columns(2)
         with c1:
-            figd = go.Figure(go.Bar(x=df_train["date"], y=df_train["duration"],
-                                    marker_color="#a8d5ba"))
-            figd.update_layout(height=240, title="训练时长（分钟）",
-                               margin=dict(l=10, r=10, t=40, b=10))
-            figd.update_xaxes(type="date", tickformat="%m-%d")
-            st.plotly_chart(figd, width="stretch", config=PLOTLY_CONFIG)
+            st.caption("训练时长（分钟）")
+            st.bar_chart(_chart_df["duration"], height=200, color="#a8d5ba")
         with c2:
-            figa = go.Figure(go.Bar(x=df_train["date"], y=df_train["actions"],
-                                    marker_color="#f0c987"))
-            figa.update_layout(height=240, title="动作数量",
-                               margin=dict(l=10, r=10, t=40, b=10))
-            figa.update_xaxes(type="date", tickformat="%m-%d")
-            st.plotly_chart(figa, width="stretch", config=PLOTLY_CONFIG)
+            st.caption("动作数量")
+            st.bar_chart(_chart_df["actions"], height=200, color="#f0c987")
 
         st.caption(f"最近 7 天记录 {len(rows)} 次训练，合计容量 {df_train['volume'].sum():.0f} kg。")
         # 用一行摘要代替可点选的表格，手机上不会误触
@@ -2113,10 +2103,9 @@ with tab_train:
     st.markdown('<div class="divider-line"></div>', unsafe_allow_html=True)
     st.markdown("#### 🎯 本周各肌群组数")
     _sets = weekly_group_sets(st.session_state.training)
-    _gs = go.Figure(go.Bar(x=list(_sets.keys()), y=list(_sets.values()),
-                           marker_color="#7fb3d5"))
-    _gs.update_layout(height=240, margin=dict(l=10, r=10, t=30, b=10), yaxis_title="组数")
-    st.plotly_chart(_gs, width="stretch", config=PLOTLY_CONFIG)
+    _gdf = pd.DataFrame({"组数": [int(_sets.get(g, 0)) for g in EXERCISE_GROUPS]},
+                        index=list(EXERCISE_GROUPS))
+    st.bar_chart(_gdf, height=240, color="#7fb3d5")
     st.caption("增肌参考：每个肌群每周 10-20 组；新手从 8-10 组起步，先把动作做标准。")
 
     _named = [e for e in EXERCISES
@@ -2128,15 +2117,9 @@ with tab_train:
         if _rows:
             _dfp = pd.DataFrame(_rows)
             _dfp["date"] = pd.to_datetime(_dfp["date"])
-            _figp = go.Figure()
-            _figp.add_trace(go.Scatter(x=_dfp["date"], y=_dfp["weight"], mode="lines+markers",
-                                       name="重量 (kg)", line=dict(color="#2F8F5B", width=3)))
-            _figp.add_trace(go.Scatter(x=_dfp["date"], y=_dfp["e1rm"], mode="lines+markers",
-                                       name="估算 1RM", line=dict(color="#E8A33D", dash="dash")))
-            _figp.update_layout(height=260, margin=dict(l=10, r=10, t=30, b=10),
-                                legend=dict(orientation="h", yanchor="bottom", y=1.02))
-            _figp.update_xaxes(type="date", tickformat="%m-%d")
-            st.plotly_chart(_figp, width="stretch", config=PLOTLY_CONFIG)
+            _pdf = _dfp.set_index("date")[["weight", "e1rm"]].rename(
+                columns={"weight": "重量 (kg)", "e1rm": "估算 1RM"})
+            st.line_chart(_pdf, height=260)
             _best = max(_rows, key=lambda r: r["e1rm"])
             st.caption(f"最佳记录：{_best['date']}｜{_best['weight']:g} kg × {_best['reps']} 次"
                        f"（估算 1RM {_best['e1rm']:g} kg）")
@@ -2177,32 +2160,18 @@ with tab_trend:
         df = grid.merge(df, on="date", how="left")
         df["date"] = pd.to_datetime(df["date"])
 
-        fig = go.Figure()
-        fig.add_trace(go.Scatter(x=df["date"], y=df["kcal"], mode="lines+markers",
-                                 name="摄入热量", connectgaps=False,
-                                 line=dict(color="#2f8f5b", width=3)))
-        fig.add_trace(go.Scatter(x=df["date"], y=df["target"], mode="lines",
-                                 name="目标摄入", connectgaps=False,
-                                 line=dict(color="#c9a227", dash="dash")))
-        fig.update_layout(height=320, margin=dict(l=10, r=10, t=30, b=10),
-                          legend=dict(orientation="h", yanchor="bottom", y=1.02))
-        fig.update_xaxes(type="date", tickformat="%m-%d")
         st.markdown("#### 热量摄入 vs 目标")
-        st.plotly_chart(fig, width="stretch", config=PLOTLY_CONFIG)
+        _tdf = df.set_index("date")[["kcal", "target"]].rename(
+            columns={"kcal": "摄入热量", "target": "目标摄入"})
+        st.line_chart(_tdf, height=300)
 
         c1, c2 = st.columns(2)
         with c1:
-            fig2 = go.Figure(go.Bar(x=df["date"], y=df["protein"], marker_color="#8fc9a8"))
-            fig2.update_layout(height=260, margin=dict(l=10, r=10, t=30, b=10),
-                               title="蛋白质（g）")
-            fig2.update_xaxes(type="date", tickformat="%m-%d")
-            st.plotly_chart(fig2, width="stretch", config=PLOTLY_CONFIG)
+            st.caption("蛋白质（g）")
+            st.bar_chart(df.set_index("date")["protein"], height=220, color="#8fc9a8")
         with c2:
-            fig3 = go.Figure(go.Bar(x=df["date"], y=df["exercise_kcal"], marker_color="#f0c987"))
-            fig3.update_layout(height=260, margin=dict(l=10, r=10, t=30, b=10),
-                               title="运动消耗（kcal/天，估算）")
-            fig3.update_xaxes(type="date", tickformat="%m-%d")
-            st.plotly_chart(fig3, width="stretch", config=PLOTLY_CONFIG)
+            st.caption("运动消耗（kcal/天，估算）")
+            st.bar_chart(df.set_index("date")["exercise_kcal"], height=220, color="#f0c987")
 
         recorded = df.dropna(subset=["kcal"]).copy()
         recorded["date"] = recorded["date"].dt.strftime("%Y-%m-%d")
