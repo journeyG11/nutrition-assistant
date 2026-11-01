@@ -418,6 +418,7 @@ def load_food_data():
             "f": float(it.get("f", 0)),
             "gl": float(it.get("gl", 0)),
             "anti": int(it.get("anti", 5)),
+            "fiber": float(it.get("fiber", 0)),
             "micro": it.get("micro", {}),
             "seasons": ["all"],
             "unit_g": 100,
@@ -429,20 +430,33 @@ def load_food_data():
 
 DATA_FOODS = load_food_data()
 MICRO_INDEX = {f["name"]: f.get("micro", {}) for f in DATA_FOODS if f.get("micro")}
+FIBER_INDEX = {f["name"]: f.get("fiber", 0) for f in DATA_FOODS}
+FIBER_FALLBACK = {
+    "西兰花": 2.6, "菠菜": 2.2, "生菜": 1.3, "番茄": 1.2, "黄瓜": 0.5,
+    "胡萝卜": 2.8, "白菜": 1.2, "蘑菇": 2.1, "南瓜": 0.8, "西兰苔": 2.6,
+    "芦笋": 2.1, "秋葵": 3.9, "油麦菜": 1.4, "芥蓝": 1.6, "菜心": 1.7,
+    "茄子": 3.0, "青椒": 1.4, "洋葱": 1.7, "豆角": 2.7, "莲藕": 4.9,
+    "苹果": 2.4, "香蕉": 2.6, "橙子": 2.4, "米饭": 0.3, "燕麦": 10.6,
+}
 
 
 def micro_for(food):
     """手写食材没有微量数据时，按名字回查成分表。"""
     m = food.get("micro") or {}
-    if m:
-        return m
     name = food["name"]
+    fib = food.get("fiber") or FIBER_INDEX.get(name)
+    if not fib:
+        fib = next((v for k, v in FIBER_INDEX.items() if k.startswith(name)), 0)
+    if not fib:
+        fib = FIBER_FALLBACK.get(name, 0)
+    if m:
+        return {**m, "fiber": float(fib or 0)}
     if name in MICRO_INDEX:
-        return MICRO_INDEX[name]
+        return {**MICRO_INDEX[name], "fiber": float(fib or 0)}
     for k, v in MICRO_INDEX.items():
         if k.startswith(name):
-            return v
-    return {}
+            return {**v, "fiber": float(fib or 0)}
+    return {"fiber": float(fib or 0)}
 
 DISH_CANDIDATES = [APP_DIR / "dishes_cn.json",
                    APP_DIR / "data" / "dishes_cn.json",
@@ -767,10 +781,10 @@ def local_risks(total, profile):
     if total["kcal"] > profile["target"] + 250:
         risks.append(f"热量偏高：估算 {total['kcal']:.0f} kcal，比目标 {profile['target']:.0f} kcal 多约 {total['kcal'] - profile['target']:.0f} kcal")
     if total["kcal"] < profile["target"] - 350:
-        risks.append(f"热量偏低：估算 {total['kcal']:.0f} kcal，长期低于目标易掉肌肉、影响代谢")
+        risks.append(f"热量偏低：估算 {total['kcal']:.0f} kcal。别硬扛，长期这样容易掉肌肉、没精神")
     protein_need = profile.get("protein_need", profile["weight"])
     if total["p"] < protein_need * 0.8:
-        risks.append(f"蛋白质不足：约 {total['p']:.0f} g，建议至少 {protein_need:.0f} g/天")
+        risks.append(f"蛋白质还差一点：约 {total['p']:.0f} g，建议至少 {protein_need:.0f} g/天")
     if total["veg_g"] < 300:
         risks.append(f"蔬菜偏少：约 {total['veg_g']:.0f} g，建议 300-500 g/天，补充膳食纤维")
     if total["gl"] > 80:
@@ -851,6 +865,17 @@ def gap_advice(total, profile, ex):
     if not tips:
         tips.append(("三项达标", "保持今天的搭配", "热量、蛋白质、蔬菜都在合理区间"))
     return tips[:3]
+
+
+def warm_note(score):
+    """一句不制造焦虑的反馈。"""
+    if score >= 85:
+        return "今天整体很稳，蛋白质和蔬菜都在线。保持这个节奏就好，不用追求完美。"
+    if score >= 70:
+        return "整体不错啦。先把今天缺的那一项补上，就已经很好了。"
+    if score >= 55:
+        return "今天有点不平衡，但你已经在记录了——这比什么都重要。明天调整一餐就够了。"
+    return "今天吃得不太理想，不过没关系，一顿饭决定不了什么。下一餐从多加一份蔬菜开始。"
 
 
 def streak_days(history):
@@ -1284,7 +1309,7 @@ def build_prompt(profile, meals, total, ex, sources, kb_note, training=None):
         for n in (profile.get("supplements") or []) if n in SUPP_DB
     ) or "无"
 
-    return f"""
+    _prompt = f"""
 你是专业营养师，请用中文、条理清晰地评估下面这一天的饮食。
 
 【用户档案】
@@ -1340,6 +1365,11 @@ def build_prompt(profile, meals, total, ex, sources, kb_note, training=None):
 <estimate>{{"kcal": 数字, "protein": 数字, "carb": 数字, "fat": 数字}}</estimate>
 请把所有菜品都算进去，包括程序没识别出来的家常菜（例如辣椒炒肉、番茄炒蛋）。
 """.strip()
+    if st.session_state.get("ui_lang") == "English":
+        _prompt += "\n\nPlease answer in English, keeping the 【document p.X】 citation format."
+        _prompt = _prompt.replace("你是专业营养师，请用中文、条理清晰地评估下面这一天的饮食。",
+                                  "You are a registered dietitian. Assess the following day of eating clearly.")
+    return _prompt
 
 
 def local_report(profile, total, risks, ex):
@@ -1524,6 +1554,9 @@ def _pick(options, key, default):
 
 
 with st.sidebar:
+    with st.expander("⚙️ 显示 / Display"):
+        lang = st.selectbox("语言 / Language", ["中文", "English"], key="ui_lang")
+
     st.header("👤 用户基础档案")
     gender = st.selectbox("性别", ["女", "男"], index=_pick(["女", "男"], "gender", "女"))
     age = st.number_input("年龄", min_value=10, max_value=90, value=int(saved.get("age", 20)))
@@ -1611,6 +1644,27 @@ with st.sidebar:
             st.session_state["api_key"] = key_input.strip()
         st.caption("未填写时使用本地规则评估，AI 评估会自动降级。")
 
+_EN = {
+    "📊 今日评估": "📊 Today", "🏋️ 训练": "🏋️ Training",
+    "📈 7 天曲线": "📈 7 Days", "📚 知识库": "📚 Knowledge",
+    "🥗 您的专属营养助手": "🥗 Your Nutrition Assistant",
+    "真实文档检索 · 膳食评估 · 运动建议 · 应季食材":
+        "Guideline RAG · Meal review · Exercise · Seasonal foods",
+    "一日三餐录入": "Meals", "开始评估": "Evaluate",
+    "今天还差什么": "What's missing today",
+    "关键营养素（按食材估算）": "Key nutrients (estimated)",
+    "今日运动建议": "Exercise suggestions",
+    "早餐": "Breakfast", "午餐": "Lunch", "晚餐": "Dinner",
+    "加餐（可选）": "Snack (optional)",
+    "估算热量": "Calories", "蛋白质": "Protein", "蔬菜": "Vegetables",
+    "日均总消耗": "Daily burn",
+}
+
+
+def T(text):
+    return _EN.get(text, text) if st.session_state.get("ui_lang") == "English" else text
+
+
 profile = {
     "gender": gender, "age": age, "height": height, "weight": weight,
     "bmr": bmr, "bmi": bmi, "period": period, "exam": exam, "note": note,
@@ -1665,8 +1719,8 @@ st.markdown(
     f"""
     <div class="hero">
       <div>
-        <h1>🥗 您的专属营养助手</h1>
-        <p>真实文档检索 · 膳食评估 · 运动建议 · 应季食材</p>
+        <h1>{T("🥗 您的专属营养助手")}</h1>
+        <p>{T("真实文档检索 · 膳食评估 · 运动建议 · 应季食材")}</p>
         <div class="chips">
           <span class="chip">🎯 今日目标 {ex['target']:.0f} kcal</span>
           <span class="chip">🥩 蛋白质 {profile['protein_need']:.0f} g</span>
@@ -1680,12 +1734,12 @@ st.markdown(
 )
 
 tab_today, tab_train, tab_trend, tab_kb = st.tabs(
-    ["📊 今日评估", "🏋️ 训练", "📈 7 天曲线", "📚 知识库"])
+    [T("📊 今日评估"), T("🏋️ 训练"), T("📈 7 天曲线"), T("📚 知识库")])
 
 
 # ---------------------------- 今日评估 ----------------------------
 with tab_today:
-    st.markdown("#### 🍽️ 一日三餐录入")
+    st.markdown(f"#### 🍽️ {T('一日三餐录入')}")
     PRESETS = {
         "食堂套餐": {"bf": "小笼包一笼，豆浆一杯",
                      "lunch": "米饭150g，青椒肉丝一份，炒青菜一份",
@@ -1752,13 +1806,13 @@ with tab_today:
             st.success("已加入：" + st.session_state.pop("quick_msg"))
 
     c1, c2, c3 = st.columns(3)
-    breakfast = c1.text_area("早餐", height=90, key="meal_bf",
+    breakfast = c1.text_area(T("早餐"), height=90, key="meal_bf",
                              placeholder="例：燕麦40g，牛奶250ml，鸡蛋1个")
-    lunch = c2.text_area("午餐", height=90, key="meal_lunch",
+    lunch = c2.text_area(T("午餐"), height=90, key="meal_lunch",
                          placeholder="例：米饭150g，鸡胸肉100g，西兰花150g")
-    dinner = c3.text_area("晚餐", height=90, key="meal_dinner",
+    dinner = c3.text_area(T("晚餐"), height=90, key="meal_dinner",
                           placeholder="例：红薯150g，鱼100g，菠菜100g")
-    snack = st.text_input("加餐（可选）", key="meal_snack", placeholder="例：苹果1个，酸奶150g")
+    snack = st.text_input(T("加餐（可选）"), key="meal_snack", placeholder="例：苹果1个，酸奶150g")
 
     with st.expander("📏 不知道多少克？常见份量速查"):
         st.markdown(
@@ -1772,7 +1826,7 @@ with tab_today:
 
     st.caption(f"🍚 已收录 {len(FOOD_INDEX)} 种食物与菜品，写「椒麻鸡一份」也能直接识别。")
 
-    do_eval = st.button("开始评估", type="primary", width="stretch")
+    do_eval = st.button(T("开始评估"), type="primary", width="stretch")
 
     if do_eval:
         meals = {"早餐": breakfast, "午餐": lunch, "晚餐": dinner, "加餐": snack}
@@ -1856,12 +1910,12 @@ with tab_today:
             unsafe_allow_html=True,
         )
         _lo, _hi = total["kcal"] * 0.9, total["kcal"] * 1.1
-        metric_card(m1, "估算热量", f"≈{total['kcal']:.0f}",
+        metric_card(m1, T("估算热量"), f"≈{total['kcal']:.0f}",
                     f"区间 {_lo:.0f}–{_hi:.0f} · 目标 {ex['target']:.0f}", "#E8A33D")
-        metric_card(m2, "蛋白质", f"{total['p']:.0f} g",
+        metric_card(m2, T("蛋白质"), f"{total['p']:.0f} g",
                     f"目标 {profile['protein_need']:.0f} g", "#4A90D9")
-        metric_card(m3, "蔬菜", f"{total['veg_g']:.0f} g", "建议 300 g 以上", "#4CB47F")
-        metric_card(m4, "日均总消耗", f"{ex['tdee']:.0f}",
+        metric_card(m3, T("蔬菜"), f"{total['veg_g']:.0f} g", "建议 300 g 以上", "#4CB47F")
+        metric_card(m4, T("日均总消耗"), f"{ex['tdee']:.0f}",
                     f"训练 {ex['train']:.0f} · 日常 {ex['neat']:.0f}", "#8E7CC3")
 
         p_prot = min(100.0, total["p"] / max(profile["protein_need"], 1) * 100)
@@ -1875,6 +1929,12 @@ with tab_today:
             f'<span>{total["veg_g"]:.0f} / 300 g</span></div>'
             f'<div class="pbar"><span style="width:{p_veg:.0f}%;background:#4CB47F"></span></div></div>'
             '</div>',
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            f'<div class="mcard" style="--accent:#4CB47F;margin-top:14px">'
+            f'<div class="mval" style="font-size:1rem;font-weight:500;line-height:1.6">'
+            f'💚 {warm_note(res["score"])}</div></div>',
             unsafe_allow_html=True,
         )
         st.caption("热量与营养素为估算值，食堂菜品的油盐差异可达 ±20%；"
@@ -1892,7 +1952,7 @@ with tab_today:
                 f"{i['type']} {i['minutes']} 分钟（{i['kcal']} kcal）" for i in res["today_items"])
                 + f"，合计 {res['today_burn']} kcal。今日目标按实际消耗计算。")
 
-        st.markdown("#### 🎯 今天还差什么")
+        st.markdown(f"#### 🎯 {T('今天还差什么')}")
         _gcols = st.columns(3)
         for _col, (_tag, _food, _note) in zip(_gcols, gap_advice(total, profile, ex)):
             _color = "#2F8F5B" if "达标" in _tag else "#E8A33D"
@@ -1904,7 +1964,7 @@ with tab_today:
                 unsafe_allow_html=True,
             )
 
-        st.markdown("#### 🧪 关键营养素（按食材估算）")
+        st.markdown(f"#### 🧪 {T('关键营养素（按食材估算）')}")
         _dri = dri_for(int(age), gender)
         _micro = total.get("micro", {})
         _nut_rows = [("钙", "ca", "mg", _dri["ca"]), ("铁", "fe", "mg", _dri["fe"]),
@@ -1976,7 +2036,7 @@ with tab_today:
                     if total["unknown"]:
                         st.caption("未识别：" + "、".join(total["unknown"]))
 
-        st.markdown("#### 🏃 今日运动建议")
+        st.markdown(f"#### 🏃 {T('今日运动建议')}")
         if profile.get("ex_sessions2", 0) > 0 and profile.get("ex_type2", "几乎不运动") != "几乎不运动":
             st.caption(f"{ex_type} 每次约 {ex['per_session']:.0f} kcal × 每周 {profile['ex_sessions']} 次，"
                        f"{profile['ex_type2']} 每次约 {ex['per_session2']:.0f} kcal × 每周 {profile['ex_sessions2']} 次；"
@@ -2065,14 +2125,12 @@ with tab_train:
 
     with st.container(border=True):
         st.markdown("##### ⚡ 临时运动（今天突然动了一次）")
-        with st.form("cardio_form"):
-            ck1, ck2, ck3 = st.columns([1.2, 1, 1])
-            ck_type = ck1.selectbox("项目", CARDIO_OPTIONS, key="cardio_type")
-            ck_min = ck2.slider("时长（分钟）", 0, 180, 45, step=5, key="cardio_min")
-            ck_int = ck3.selectbox("强度", ["轻松", "适中", "高强度"], index=1, key="cardio_int")
-            st.caption("滑完再点按钮才会记录，拖动时页面不会跳。")
-            ck_submit = st.form_submit_button("记录这次运动")
-        if ck_submit:
+        ck1, ck2, ck3 = st.columns([1.2, 1, 1])
+        ck_type = ck1.selectbox("项目", CARDIO_OPTIONS, key="cardio_type")
+        ck_min = ck2.slider("时长（分钟）", 0, 180, 45, step=5, key="cardio_min")
+        ck_int = ck3.selectbox("强度", ["轻松", "适中", "高强度"], index=1, key="cardio_int")
+        st.caption("选好后点「记录这次运动」才会保存。")
+        if st.button("记录这次运动", key="save_cardio"):
             _est = cardio_kcal(ck_type, ck_min, ck_int, weight)
             _day = t_date.isoformat()
             _rec = st.session_state.training.setdefault(
