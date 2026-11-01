@@ -73,25 +73,39 @@ CSS = """
         --blue: #4A90D9;
         --rose: #D96B6B;
     }
+    html, body, [class*="css"] {
+        font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif;
+        letter-spacing: .1px;
+    }
     .stApp {
         background:
             radial-gradient(900px 520px at 100% -10%, rgba(47,143,91,.08), transparent 62%),
             radial-gradient(700px 420px at -10% 110%, rgba(232,163,61,.05), transparent 60%);
+        background-attachment: fixed;
     }
-    .block-container {padding-top: 1.2rem; padding-bottom: 2.5rem; max-width: 1200px;}
+    .block-container {padding-top: 1.1rem; padding-bottom: 2.5rem; max-width: 1080px;}
 
     /* 顶部横幅 */
     .hero {
+        position: relative; overflow: hidden;
         display: flex; justify-content: space-between; align-items: center; gap: 20px;
         background:
-            radial-gradient(120% 180% at 0% 0%, rgba(47,143,91,.20), transparent 62%),
-            linear-gradient(120deg, rgba(47,143,91,0.10), rgba(73,179,125,0.03));
+            radial-gradient(520px 260px at 88% -30%, rgba(232,163,61,.22), transparent 65%),
+            radial-gradient(480px 240px at 0% 120%, rgba(47,143,91,.28), transparent 60%),
+            linear-gradient(135deg, rgba(47,143,91,.14), rgba(73,179,125,.05));
         border: 1px solid rgba(47,143,91,0.18);
-        border-radius: 20px;
-        padding: 22px 26px;
-        margin-bottom: 18px;
+        border-radius: 24px;
+        padding: 26px 30px;
+        margin-bottom: 20px;
+        box-shadow: 0 12px 30px rgba(31,107,69,.10);
+        animation: fadeUp .45s ease;
     }
-    .hero h1 {margin: 0; font-size: 2rem; letter-spacing: .5px; color: var(--text-color);}
+    .hero::after {
+        content: ""; position: absolute; right: -50px; bottom: -70px;
+        width: 220px; height: 220px; border-radius: 50%;
+        background: radial-gradient(circle, rgba(232,163,61,.20), transparent 70%);
+    }
+    .hero h1 {margin: 0; font-size: 2.25rem; font-weight: 800; letter-spacing: -.6px; color: var(--text-color);}
     .hero p {margin: .35rem 0 0; opacity: .68; font-size: .95rem;}
     .chips {display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap;}
     .chip {
@@ -117,7 +131,10 @@ CSS = """
         gap: 4px; background: rgba(47,143,91,0.08); padding: 4px; border-radius: 14px;
     }
     .stTabs [data-baseweb="tab"] {border-radius: 10px; padding: 6px 16px; background: transparent;}
-    .stTabs [aria-selected="true"] {background: var(--brand) !important;}
+    .stTabs [aria-selected="true"] {
+        background: linear-gradient(135deg, #2F8F5B, #4CB47F) !important;
+        box-shadow: 0 4px 12px rgba(47,143,91,.25);
+    }
     .stTabs [aria-selected="true"] p {color: #fff !important;}
 
     /* 按钮 */
@@ -140,9 +157,10 @@ CSS = """
         background-color: rgba(128,128,128,.10);
         border: 1px solid rgba(128,128,128,.18);
         border-left: 4px solid var(--accent, #2F8F5B);
-        border-radius: 14px; padding: 14px 16px; min-height: 96px;
-        box-shadow: 0 2px 8px rgba(0,0,0,.04);
+        border-radius: 18px; padding: 16px 18px; min-height: 96px;
+        box-shadow: 0 6px 18px rgba(0,0,0,.05);
         transition: transform .15s ease, box-shadow .15s ease;
+        animation: fadeUp .35s ease;
     }
     .mcard:hover {transform: translateY(-2px); box-shadow: 0 6px 18px rgba(0,0,0,.07);}
     .mlabel {font-size: .78rem; opacity: .62; letter-spacing: .4px;}
@@ -164,6 +182,32 @@ CSS = """
     .divider-line {height: 1px; background: rgba(128,128,128,0.25); margin: 0.6rem 0 1rem 0;}
     .footer {text-align: center; opacity: .45; font-size: .78rem; margin-top: 2rem;}
     div[data-testid="stAlert"] {border-radius: 14px;}
+
+    /* 步骤标题 */
+    .step {display: flex; align-items: center; gap: 10px; margin: 8px 0 12px;}
+    .step-no {
+        width: 26px; height: 26px; border-radius: 50%; background: var(--brand);
+        color: #fff; display: flex; align-items: center; justify-content: center;
+        font-weight: 700; font-size: .82rem; flex: none;
+    }
+    .step-title {font-size: 1.05rem; font-weight: 650;}
+
+    /* 空状态 */
+    .empty {
+        border: 1px dashed rgba(128,128,128,.35); border-radius: 16px;
+        padding: 26px 20px; text-align: center; margin-top: 14px;
+    }
+    .empty .big {font-size: 2rem;}
+    .empty .et {font-weight: 600; margin-top: 6px;}
+    .empty .es {opacity: .65; font-size: .88rem; margin-top: 4px;}
+
+    /* 侧边栏档案卡 */
+    .side-card {
+        background: rgba(47,143,91,.10); border: 1px solid rgba(47,143,91,.22);
+        border-radius: 14px; padding: 12px 14px; margin: 4px 0 10px;
+    }
+    .side-card .row {display: flex; justify-content: space-between; font-size: .82rem; margin: 3px 0;}
+    .side-card .row span {opacity: .7;}
     /* 侧边栏交给 Streamlit 主题自己处理，避免深色模式下浅底浅字 */
     @media (prefers-color-scheme: dark) {
         .tag {background: rgba(47,143,91,0.28);}
@@ -177,6 +221,22 @@ CSS = """
         .stTabs [data-baseweb="tab-list"] {flex-wrap: wrap;}
         .hero-art {display: none;}
         .hero h1 {font-size: 1.55rem;}
+        .block-container {padding-left: .95rem; padding-right: .95rem; padding-top: .8rem;}
+        .hero {padding: 18px 18px; border-radius: 18px;}
+        .hero p {font-size: .86rem;}
+        .chip {font-size: .74rem; padding: 3px 10px;}
+        .mcard {min-height: 82px; padding: 12px 14px; border-radius: 16px;}
+        .mval {font-size: 1.45rem;}
+        .mlabel, .msub {font-size: .74rem;}
+        /* 16px 以上，iOS 聚焦输入框时不会自动放大页面 */
+        input, textarea, select {font-size: 16px !important;}
+        .stButton > button {min-height: 44px;}
+        .stTextArea textarea {min-height: 84px;}
+        h3 {font-size: 1.05rem;}
+    }
+    @keyframes fadeUp {
+        from {opacity: 0; transform: translateY(5px);}
+        to {opacity: 1; transform: translateY(0);}
     }
 </style>
 """
@@ -411,6 +471,7 @@ def load_dishes():
             "f": float(it.get("f", 0)),
             "gl": float(it.get("c", 0)) * 0.6,
             "anti": int(it.get("anti", 5)),
+            "cat": str(it.get("cat", "其他")),
             "seasons": ["all"],
             "unit_g": float(it.get("serving_g", 100)),
             "piece_g": float(it.get("piece_g", 0) or 0),
@@ -421,6 +482,10 @@ def load_dishes():
 
 
 DISH_FOODS = load_dishes()
+DISH_BY_CAT = {}
+for _d in DISH_FOODS:
+    DISH_BY_CAT.setdefault(_d.get("cat", "其他"), []).append(_d["name"])
+
 FOOD_INDEX = {}
 for _food in DATA_FOODS + DISH_FOODS + FOODS:   # 手写库放最后，同名时优先级最高
     FOOD_INDEX[_food["name"]] = _food
@@ -1467,7 +1532,14 @@ with st.sidebar:
 
     bmr = 10 * weight + 6.25 * height - 5 * age - (161 if gender == "女" else 5)
     bmi = weight / ((height / 100) ** 2)
-    st.info(f"🔥 BMR {bmr:.0f} kcal/天　·　BMI {bmi:.1f}")
+    st.markdown(
+        f'<div class="side-card">'
+        f'<div class="row"><span>基础代谢</span><b>{bmr:.0f} kcal</b></div>'
+        f'<div class="row"><span>BMI</span><b>{bmi:.1f}</b></div>'
+        f'<div class="row"><span>连续记录</span><b>{streak_days(st.session_state.history)} 天</b></div>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
     if bmi < 18.5:
         st.caption("⚠️ BMI 偏低，不建议继续减重，可把「减脂权重」调低。")
     elif bmi >= 28:
@@ -1662,9 +1734,17 @@ with tab_today:
         st.session_state[f"meal_{_k}"] = (_cur + "，" + _text) if _cur else _text
         st.session_state["quick_msg"] = _text
 
+    def _clear_quick():
+        st.session_state["quick_dishes"] = []
+
+    _CATS = ["热门"] + sorted(DISH_BY_CAT.keys())
+
     with st.expander("🍱 食堂点菜（不想打字就点这里）"):
-        q1, q2, q3 = st.columns([2.4, 1, 1])
-        q1.multiselect("选菜（可多选）", CANTEEN_QUICK, key="quick_dishes")
+        q0, q1, q2, q3 = st.columns([1.1, 2.6, 1, 1])
+        _cat = q0.selectbox("分类", _CATS, key="quick_cat", on_change=_clear_quick)
+        _opts = (CANTEEN_QUICK if _cat == "热门"
+                 else sorted(set(DISH_BY_CAT.get(_cat, []))))
+        q1.multiselect(f"选菜（{len(_opts)} 道，可多选）", _opts, key="quick_dishes")
         q2.selectbox("加到", list(_KEY_MAP), key="quick_meal")
         q3.selectbox("份量", ["一份", "半份", "两份"], key="quick_portion")
         st.button("加入这一餐", key="quick_add", on_click=_add_quick)
