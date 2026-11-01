@@ -39,7 +39,7 @@ TRAINING_FILE = APP_DIR / "training_history.json"
 PROFILE_FILE = APP_DIR / "profile.json"
 PREPROCESS_VERSION = "2026-10-19-2"  # 改文本处理逻辑时改这里，强制重建索引
 
-ASSET_DIRS = [APP_DIR / "assets", APP_DIR / "pdf", PDF_DIR]
+ASSET_DIRS = [APP_DIR / "assets", APP_DIR / "pdf", PDF_DIR, APP_DIR]
 
 
 def find_asset(name):
