@@ -25,6 +25,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 import numpy as np
+from PIL import Image
 from pypdf import PdfReader
 from sklearn.feature_extraction.text import TfidfVectorizer
 
@@ -37,6 +38,20 @@ HISTORY_FILE = APP_DIR / "nutrition_history.json"
 TRAINING_FILE = APP_DIR / "training_history.json"
 PROFILE_FILE = APP_DIR / "profile.json"
 PREPROCESS_VERSION = "2026-10-19-2"  # 改文本处理逻辑时改这里，强制重建索引
+
+ASSET_DIRS = [APP_DIR / "assets", APP_DIR / "pdf", PDF_DIR]
+
+
+def find_asset(name):
+    for d in ASSET_DIRS:
+        p = d / name
+        if p.exists():
+            return p
+    return None
+
+
+MASCOT_PATH = find_asset("mascot.png")
+BOWL_PATH = find_asset("bowl.png")
 
 
 def _detect_cloud():
@@ -62,7 +77,13 @@ try:
 except Exception:
     pass
 
-st.set_page_config(page_title="您的专属营养助手", page_icon="🥗", layout="wide")
+_page_icon = "🥗"
+if MASCOT_PATH:
+    try:
+        _page_icon = Image.open(MASCOT_PATH)
+    except Exception:
+        pass
+st.set_page_config(page_title="您的专属营养助手", page_icon=_page_icon, layout="wide")
 
 CSS = """
 <style>
@@ -87,32 +108,23 @@ CSS = """
 
     /* 顶部横幅 */
     .hero {
-        position: relative; overflow: hidden;
         display: flex; justify-content: space-between; align-items: center; gap: 20px;
-        background:
-            radial-gradient(520px 260px at 88% -30%, rgba(232,163,61,.22), transparent 65%),
-            radial-gradient(480px 240px at 0% 120%, rgba(47,143,91,.28), transparent 60%),
-            linear-gradient(135deg, rgba(47,143,91,.14), rgba(73,179,125,.05));
-        border: 1px solid rgba(47,143,91,0.18);
-        border-radius: 24px;
-        padding: 26px 30px;
-        margin-bottom: 20px;
-        box-shadow: 0 12px 30px rgba(31,107,69,.10);
-        animation: fadeUp .45s ease;
+        border-bottom: 1px solid rgba(128,128,128,.20);
+        padding: 4px 0 14px;
+        margin-bottom: 14px;
     }
-    .hero::after {
-        content: ""; position: absolute; right: -50px; bottom: -70px;
-        width: 220px; height: 220px; border-radius: 50%;
-        background: radial-gradient(circle, rgba(232,163,61,.20), transparent 70%);
-    }
-    .hero h1 {margin: 0; font-size: 2.25rem; font-weight: 800; letter-spacing: -.6px; color: var(--text-color);}
-    .hero p {margin: .35rem 0 0; opacity: .68; font-size: .95rem;}
-    .chips {display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap;}
+    .hero h1 {margin: 0; font-size: 1.7rem; font-weight: 650; letter-spacing: -.2px; color: var(--text-color);}
+    .hero p {margin: .3rem 0 0; opacity: .6; font-size: .9rem;}
+    .chips {display: flex; gap: 0; margin-top: 8px; flex-wrap: wrap;}
     .chip {
-        background: rgba(47,143,91,.12); border: 1px solid rgba(47,143,91,.22);
-        padding: 4px 12px; border-radius: 999px; font-size: .8rem;
+        background: none; border: none; padding: 0; margin-right: 16px;
+        font-size: .8rem; opacity: .55;
     }
-    .hero-art {font-size: 64px; opacity: .92; filter: drop-shadow(0 8px 16px rgba(47,143,91,.25));}
+    .hero-art {font-size: 48px; opacity: .8;}
+    .hero-mascot {
+        width: 84px; height: auto; opacity: .95;
+    }
+    .empty-img {width: 150px; height: 150px; object-fit: contain; display: block; margin: 0 auto 8px;}
 
     /* 健康分环形 */
     .ring-box {
@@ -120,7 +132,7 @@ CSS = """
         background: rgba(128,128,128,.10);
         border: 1px solid rgba(128,128,128,.18); border-radius: 14px;
         padding: 10px; min-height: 118px;
-        box-shadow: 0 2px 8px rgba(0,0,0,.04);
+        box-shadow: none;
     }
 
     /* 小标题左侧色条 */
@@ -133,8 +145,8 @@ CSS = """
     }
     .stTabs [data-baseweb="tab"] {border-radius: 10px; padding: 6px 16px; background: transparent;}
     .stTabs [aria-selected="true"] {
-        background: linear-gradient(135deg, #2F8F5B, #4CB47F) !important;
-        box-shadow: 0 4px 12px rgba(47,143,91,.25);
+        background: var(--brand) !important;
+        box-shadow: none;
     }
     .stTabs [aria-selected="true"] p {color: #fff !important;}
 
@@ -161,15 +173,12 @@ CSS = """
 
     /* 指标卡片 */
     .mcard {
-        background-color: rgba(128,128,128,.10);
-        border: 1px solid rgba(128,128,128,.18);
-        border-left: 4px solid var(--accent, #2F8F5B);
-        border-radius: 18px; padding: 16px 18px; min-height: 96px;
-        box-shadow: 0 6px 18px rgba(0,0,0,.05);
-        transition: transform .15s ease, box-shadow .15s ease;
-        animation: fadeUp .35s ease;
+        background-color: rgba(128,128,128,.04);
+        border: 1px solid rgba(128,128,128,.16);
+        border-left: 3px solid var(--accent, #2F8F5B);
+        border-radius: 12px; padding: 14px 16px; min-height: 92px;
+        box-shadow: none;
     }
-    .mcard:hover {transform: translateY(-2px); box-shadow: 0 6px 18px rgba(0,0,0,.07);}
     .mlabel {font-size: .78rem; opacity: .62; letter-spacing: .4px;}
     .mval {font-size: 1.75rem; font-weight: 700; margin-top: 2px; line-height: 1.2;}
     .msub {font-size: .78rem; opacity: .62; margin-top: 2px;}
@@ -188,6 +197,11 @@ CSS = """
     .hint {opacity: 0.7; font-size: 0.85rem;}
     .divider-line {height: 1px; background: rgba(128,128,128,0.25); margin: 0.6rem 0 1rem 0;}
     .footer {text-align: center; opacity: .45; font-size: .78rem; margin-top: 2rem;}
+    .warm {
+        border-left: 3px solid rgba(47,143,91,.45);
+        padding: 2px 0 2px 12px; margin-top: 14px;
+        font-size: .92rem; opacity: .8; line-height: 1.6;
+    }
     div[data-testid="stAlert"] {border-radius: 14px;}
 
     /* 步骤标题 */
@@ -227,6 +241,8 @@ CSS = """
     @media (max-width: 640px) {
         .stTabs [data-baseweb="tab-list"] {flex-wrap: wrap;}
         .hero-art {display: none;}
+        .hero-mascot {width: 84px;}
+        .empty-img {width: 112px; height: 112px;}
         .hero h1 {font-size: 1.55rem;}
         .block-container {padding-left: .95rem; padding-right: .95rem; padding-top: .8rem;}
         .hero {padding: 18px 18px; border-radius: 18px;}
@@ -240,10 +256,6 @@ CSS = """
         .stButton > button {min-height: 44px;}
         .stTextArea textarea {min-height: 84px;}
         h3 {font-size: 1.05rem;}
-    }
-    @keyframes fadeUp {
-        from {opacity: 0; transform: translateY(5px);}
-        to {opacity: 1; transform: translateY(0);}
     }
 </style>
 """
@@ -263,6 +275,15 @@ def metric_card(col, label, value, sub="", color="#2F8F5B"):
         f'<div class="msub">{sub}</div></div>',
         unsafe_allow_html=True,
     )
+
+
+def data_uri(path):
+    """把图片内嵌到 HTML，避免依赖静态文件服务。"""
+    import base64
+    try:
+        return "data:image/png;base64," + base64.b64encode(path.read_bytes()).decode()
+    except Exception:
+        return ""
 
 
 def score_ring(score, color="#2F8F5B", size=104):
@@ -1372,10 +1393,6 @@ def build_prompt(profile, meals, total, ex, sources, kb_note, training=None):
 <estimate>{{"kcal": 数字, "protein": 数字, "carb": 数字, "fat": 数字}}</estimate>
 请把所有菜品都算进去，包括程序没识别出来的家常菜（例如辣椒炒肉、番茄炒蛋）。
 """.strip()
-    if st.session_state.get("ui_lang") == "English":
-        _prompt += "\n\nPlease answer in English, keeping the 【document p.X】 citation format."
-        _prompt = _prompt.replace("你是专业营养师，请用中文、条理清晰地评估下面这一天的饮食。",
-                                  "You are a registered dietitian. Assess the following day of eating clearly.")
     return _prompt
 
 
@@ -1561,9 +1578,6 @@ def _pick(options, key, default):
 
 
 with st.sidebar:
-    with st.expander("⚙️ 显示 / Display"):
-        lang = st.selectbox("语言 / Language", ["中文", "English"], key="ui_lang")
-
     st.header("👤 用户基础档案")
     gender = st.selectbox("性别", ["女", "男"], index=_pick(["女", "男"], "gender", "女"))
     age = st.number_input("年龄", min_value=10, max_value=90, value=int(saved.get("age", 20)))
@@ -1651,25 +1665,8 @@ with st.sidebar:
             st.session_state["api_key"] = key_input.strip()
         st.caption("未填写时使用本地规则评估，AI 评估会自动降级。")
 
-_EN = {
-    "📊 今日评估": "📊 Today", "🏋️ 训练": "🏋️ Training",
-    "📈 7 天曲线": "📈 7 Days", "📚 知识库": "📚 Knowledge",
-    "🥗 您的专属营养助手": "🥗 Your Nutrition Assistant",
-    "真实文档检索 · 膳食评估 · 运动建议 · 应季食材":
-        "Guideline RAG · Meal review · Exercise · Seasonal foods",
-    "一日三餐录入": "Meals", "开始评估": "Evaluate",
-    "今天还差什么": "What's missing today",
-    "关键营养素（按食材估算）": "Key nutrients (estimated)",
-    "今日运动建议": "Exercise suggestions",
-    "早餐": "Breakfast", "午餐": "Lunch", "晚餐": "Dinner",
-    "加餐（可选）": "Snack (optional)",
-    "估算热量": "Calories", "蛋白质": "Protein", "蔬菜": "Vegetables",
-    "日均总消耗": "Daily burn",
-}
-
-
 def T(text):
-    return _EN.get(text, text) if st.session_state.get("ui_lang") == "English" else text
+    return text
 
 
 profile = {
@@ -1722,31 +1719,34 @@ def kb_summary():
 # --------------------------------------------------------------------------
 # 主界面
 # --------------------------------------------------------------------------
+_hero_art = (f'<img class="hero-mascot" src="{data_uri(MASCOT_PATH)}" alt="mascot"/>'
+             if MASCOT_PATH else '<div class="hero-art">🥗</div>')
+
 st.markdown(
     f"""
     <div class="hero">
       <div>
-        <h1>{T("🥗 您的专属营养助手")}</h1>
+        <h1>您的专属营养助手</h1>
         <p>{T("真实文档检索 · 膳食评估 · 运动建议 · 应季食材")}</p>
         <div class="chips">
-          <span class="chip">🎯 今日目标 {ex['target']:.0f} kcal</span>
-          <span class="chip">🥩 蛋白质 {profile['protein_need']:.0f} g</span>
-          <span class="chip">🔥 连续 {streak_days(st.session_state.history)} 天 · 共记录 {len(st.session_state.history)} 天</span>
+          <span class="chip">今日目标 {ex['target']:.0f} kcal</span>
+          <span class="chip">蛋白质 {profile['protein_need']:.0f} g</span>
+          <span class="chip">连续 {streak_days(st.session_state.history)} 天 · 共记录 {len(st.session_state.history)} 天</span>
         </div>
       </div>
-      <div class="hero-art">🥗</div>
+      {_hero_art}
     </div>
     """,
     unsafe_allow_html=True,
 )
 
 tab_today, tab_train, tab_trend, tab_kb = st.tabs(
-    [T("📊 今日评估"), T("🏋️ 训练"), T("📈 7 天曲线"), T("📚 知识库")])
+    ["今日评估", "训练", "7 天曲线", "知识库"])
 
 
 # ---------------------------- 今日评估 ----------------------------
 with tab_today:
-    st.markdown(f"#### 🍽️ {T('一日三餐录入')}")
+    st.markdown(f"#### {T('一日三餐录入')}")
     PRESETS = {
         "食堂套餐": {"bf": "小笼包一笼，豆浆一杯",
                      "lunch": "米饭150g，青椒肉丝一份，炒青菜一份",
@@ -1768,13 +1768,13 @@ with tab_today:
 
     st.caption("懒得打字？点一下直接填好一整天：")
     _pc = st.columns(4)
-    _pc[0].button("🍱 食堂套餐", on_click=_apply_preset,
+    _pc[0].button("食堂套餐", on_click=_apply_preset,
                   args=(PRESETS["食堂套餐"],), width="stretch")
-    _pc[1].button("🥗 减脂日", on_click=_apply_preset,
+    _pc[1].button("减脂日", on_click=_apply_preset,
                   args=(PRESETS["减脂日"],), width="stretch")
-    _pc[2].button("💪 增肌日", on_click=_apply_preset,
+    _pc[2].button("增肌日", on_click=_apply_preset,
                   args=(PRESETS["增肌日"],), width="stretch")
-    if _pc[3].button("🧹 清空", width="stretch"):
+    if _pc[3].button("清空", width="stretch"):
         for _k in ("bf", "lunch", "dinner", "snack"):
             st.session_state[f"meal_{_k}"] = ""
 
@@ -1911,6 +1911,18 @@ with tab_today:
             "ex": ex_view, "today_burn": _today_burn, "today_items": _today_items,
         }
 
+    if not st.session_state.last_result:
+        _bowl_uri = data_uri(BOWL_PATH) if BOWL_PATH else ""
+        _empty_img = (f'<img class="empty-img" src="{_bowl_uri}" alt="bowl"/>'
+                      if _bowl_uri else '<div class="big">🥗</div>')
+        st.markdown(
+            f'<div class="empty">{_empty_img}'
+            f'<div class="et">今天吃了什么？</div>'
+            f'<div class="es">填三餐，或者点上面的模板 / 食堂点菜。<br>'
+            f'评估后这里会显示热量、蛋白质、缺口和依据。</div></div>',
+            unsafe_allow_html=True,
+        )
+
     res = st.session_state.last_result
     if res:
         total = res["total"]
@@ -1947,9 +1959,7 @@ with tab_today:
             unsafe_allow_html=True,
         )
         st.markdown(
-            f'<div class="mcard" style="--accent:#4CB47F;margin-top:14px">'
-            f'<div class="mval" style="font-size:1rem;font-weight:500;line-height:1.6">'
-            f'💚 {warm_note(res["score"])}</div></div>',
+            f'<div class="warm">{warm_note(res["score"])}</div>',
             unsafe_allow_html=True,
         )
         st.caption("热量与营养素为估算值，食堂菜品的油盐差异可达 ±20%；"
@@ -1967,7 +1977,7 @@ with tab_today:
                 f"{i['type']} {i['minutes']} 分钟（{i['kcal']} kcal）" for i in res["today_items"])
                 + f"，合计 {res['today_burn']} kcal。今日目标按实际消耗计算。")
 
-        st.markdown(f"#### 🎯 {T('今天还差什么')}")
+        st.markdown(f"#### {T('今天还差什么')}")
         _gcols = st.columns(3)
         for _col, (_tag, _food, _note) in zip(_gcols, gap_advice(total, profile, ex)):
             _color = "#2F8F5B" if "达标" in _tag else "#E8A33D"
@@ -1979,7 +1989,7 @@ with tab_today:
                 unsafe_allow_html=True,
             )
 
-        st.markdown(f"#### 🧪 {T('关键营养素（按食材估算）')}")
+        st.markdown(f"#### {T('关键营养素（按食材估算）')}")
         _dri = dri_for(int(age), gender)
         _micro = total.get("micro", {})
         _nut_rows = [("钙", "ca", "mg", _dri["ca"]), ("铁", "fe", "mg", _dri["fe"]),
@@ -2051,7 +2061,7 @@ with tab_today:
                     if total["unknown"]:
                         st.caption("未识别：" + "、".join(total["unknown"]))
 
-        st.markdown(f"#### 🏃 {T('今日运动建议')}")
+        st.markdown(f"#### {T('今日运动建议')}")
         if profile.get("ex_sessions2", 0) > 0 and profile.get("ex_type2", "几乎不运动") != "几乎不运动":
             st.caption(f"{ex_type} 每次约 {ex['per_session']:.0f} kcal × 每周 {profile['ex_sessions']} 次，"
                        f"{profile['ex_type2']} 每次约 {ex['per_session2']:.0f} kcal × 每周 {profile['ex_sessions2']} 次；"
@@ -2135,11 +2145,11 @@ BMI {bmi:.1f}｜BMR {bmr:.0f} kcal｜TDEE {ex['tdee']:.0f} kcal｜建议摄入 {
 
 # ---------------------------- 训练记录 ----------------------------
 with tab_train:
-    st.markdown("#### 🏋️ 今日训练记录")
+    st.markdown("#### 今日训练记录")
     t_date = st.date_input("训练日期", value=date.today())
 
     with st.container(border=True):
-        st.markdown("##### ⚡ 临时运动（今天突然动了一次）")
+        st.markdown("##### 临时运动（今天突然动了一次）")
         ck1, ck2, ck3 = st.columns([1.2, 1, 1])
         ck_type = ck1.selectbox("项目", CARDIO_OPTIONS, key="cardio_type")
         ck_min = ck2.slider("时长（分钟）", 0, 180, 45, step=5, key="cardio_min")
@@ -2254,7 +2264,7 @@ with tab_train:
             {"volume": 0, "duration": 0, "actions": 0})
         df_train["date"] = pd.to_datetime(df_train["date"])
 
-        st.markdown("#### 📊 最近 7 天训练")
+        st.markdown("#### 最近 7 天训练")
         _chart_df = df_train.set_index("date")
         st.caption("训练容量（kg）")
         st.bar_chart(_chart_df["volume"], height=220, color="#7fb3d5")
@@ -2279,7 +2289,7 @@ with tab_train:
             st.caption(f"最近一次：{_last['date']}｜{int(_last['duration'])} 分钟｜{_last['actions']} 个动作")
 
     st.markdown('<div class="divider-line"></div>', unsafe_allow_html=True)
-    st.markdown("#### 🎯 本周各肌群组数")
+    st.markdown("#### 本周各肌群组数")
     _sets = weekly_group_sets(st.session_state.training)
     _gdf = pd.DataFrame({"组数": [int(_sets.get(g, 0)) for g in EXERCISE_GROUPS]},
                         index=list(EXERCISE_GROUPS))
@@ -2289,7 +2299,7 @@ with tab_train:
     _named = [e for e in EXERCISES
               if any(e in (r.get("exercises") or {}) for r in st.session_state.training.values())]
     if _named:
-        st.markdown("#### 📈 动作进展")
+        st.markdown("#### 动作进展")
         _pick_ex = st.selectbox("选择动作", _named, key="progress_ex")
         _rows = exercise_progress(st.session_state.training, _pick_ex)
         if _rows:
@@ -2303,7 +2313,7 @@ with tab_train:
                        f"（估算 1RM {_best['e1rm']:g} kg）")
 
     st.markdown('<div class="divider-line"></div>', unsafe_allow_html=True)
-    st.markdown("#### 📅 4 周训练周期")
+    st.markdown("#### 4 周训练周期")
     _cyc = st.date_input("周期开始日期", value=date.today(), key="cycle_start")
     _week = ((date.today() - _cyc).days // 7) % 4 + 1 if date.today() >= _cyc else 1
     st.caption(f"今天是第 {_week} 周（每 4 周循环一次）")
