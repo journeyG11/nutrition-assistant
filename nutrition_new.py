@@ -580,31 +580,54 @@ def season_today(month=None):
 
 
 NUM_UNIT = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*(kg|千克|g|克|ml|毫升)")
-SERVING = re.compile(r"^\s*(半|一|两|二|三|四|五|\d+)\s*(个|碗|杯|片|根|勺|份|盒|袋|块|张|罐|条)")
+SERVING = re.compile(
+    r"^\s*(半|一|两|二|三|四|五|\d+)\s*"
+    r"(个|碗|杯|片|根|勺|份|盒|袋|包|瓶|盘|块|张|罐|条|只|颗|粒|串|笼)")
 CN_NUM = {"半": 0.5, "一": 1, "两": 2, "二": 2, "三": 3, "四": 4, "五": 5}
 
+# 常见"一个/一根"大概多少克（没列到的按一份的重量兜底）
+PIECE_WEIGHTS = {
+    "鸡蛋": 50, "苹果": 200, "香蕉": 120, "橙子": 200, "红薯": 150, "玉米": 150,
+    "火腿肠": 50, "烤肠": 60, "包子": 100, "馒头": 100, "油条": 60, "饺子": 20,
+    "小笼包": 25, "鱼丸": 15, "牛肉丸": 20, "鸡翅": 60, "鸡腿": 100, "茶叶蛋": 50,
+    "麻薯": 30, "月饼": 80, "蛋挞": 60, "泡芙": 50, "甜甜圈": 70, "可颂": 60,
+    "肉松小贝": 80, "糖葫芦": 100, "烤串": 20, "章鱼小丸子": 15,
+    "草莓": 15, "葡萄": 8, "蓝莓": 2, "樱桃": 8, "豆腐": 100, "虾": 10,
+    "鸡胸肉": 120, "鱼": 100, "番茄": 150, "黄瓜": 150,
+}
+COUNT_UNITS = ("个", "根", "片", "块", "张", "只", "颗", "粒", "条", "串")
+QTY_PATTERN = (r"(半|一|两|二|三|四|五|\d+(?:\.\d+)?)\s*"
+               r"(斤|两|kg|千克|g|克|ml|毫升|个|碗|杯|片|根|勺|份|盒|袋|包|瓶|盘|块|张|罐|条|只|颗|粒|串|笼)")
 
-def _grams_after(text, pos, food):
-    """在食物名之后解析重量，识别 "100g" / "一碗" 这类写法。"""
-    tail = text[pos:pos + 12]
-    m = NUM_UNIT.match(tail)
-    if m and m.group(1):
-        val = float(m.group(1))
-        unit = (m.group(2) or "").lower()
-        if unit in ("kg", "千克"):
-            return val * 1000
-        if unit in ("ml", "毫升"):
-            return val  # 近似按 1ml≈1g
-        return val
-    s = SERVING.match(tail)
-    if s:
-        raw = s.group(1)
-        count = float(raw) if raw.isdigit() else CN_NUM.get(raw, 1)
-        unit = s.group(2)
-        # 「水饺 12 个」要按单个重量算，而不是 12 份
-        if unit in ("个", "片", "根", "块", "张") and food.get("piece_g"):
-            return food["piece_g"] * count
-        return food["unit_g"] * count
+
+def _qty_to_grams(raw, unit, food):
+    cnt = float(raw) if raw.replace(".", "", 1).isdigit() else CN_NUM.get(raw, 1)
+    if unit == "斤":
+        return cnt * 500
+    if unit == "两":
+        return cnt * 50
+    if unit in ("kg", "千克"):
+        return cnt * 1000
+    if unit in ("g", "克", "ml", "毫升"):
+        return cnt
+    if unit in COUNT_UNITS:
+        piece = (food.get("piece_g") or PIECE_WEIGHTS.get(food["name"])
+                 or food.get("unit_g") or 100)
+        return piece * cnt
+    return food["unit_g"] * cnt
+
+
+def _grams_after(text, start, end, food):
+    """解析食物前后的份量：「米饭一碗」「两个鸡蛋」「一斤苹果」。"""
+    tail = text[end:end + 12]
+    m = re.match(r"^\s*" + QTY_PATTERN, tail)
+    if m:
+        return _qty_to_grams(m.group(1), m.group(2), food)
+    # 中文更常见的是把量词写在前面：「两个鸡蛋」「一斤米饭」
+    head = text[max(0, start - 12):start]
+    m = re.search(QTY_PATTERN + r"\s*$", head)
+    if m:
+        return _qty_to_grams(m.group(1), m.group(2), food)
     return food["unit_g"]
 
 
@@ -625,7 +648,7 @@ def estimate_meal(text):
             continue
         taken.append((m.start(), m.end()))
         food = FOOD_INDEX[ALIASES[key]]
-        grams = _grams_after(text, m.end(), food)
+        grams = _grams_after(text, m.start(), m.end(), food)
         ratio = grams / 100.0
         result["kcal"] += food["kcal"] * ratio
         result["p"] += food["p"] * ratio
@@ -649,8 +672,10 @@ def estimate_meal(text):
     for seg in re.finditer(r"[^，,、;；\s]+", text):
         _s, _e = seg.start(), seg.end()
         _covered = sum(max(0, min(_e, b) - max(_s, a)) for a, b in taken if a < _e and b > _s)
-        _ratio = _covered / max(1, _e - _s)
-        _dish_like = any(m in seg.group(0) for m in COOK_MARKERS)
+        # 去掉结尾的份量（"两根""一份""250g"），它不该拉低菜名覆盖率
+        _core = re.sub(QTY_PATTERN, "", seg.group(0)).strip()
+        _ratio = _covered / max(1, len(_core))
+        _dish_like = any(m in _core for m in COOK_MARKERS)
         if _covered == 0 or (_dish_like and _ratio < 0.6):
             leftovers.append(seg.group(0))
     result["unknown"] = leftovers[:8]
