@@ -129,6 +129,7 @@ CSS = """
     /* 标签页：胶囊式 */
     .stTabs [data-baseweb="tab-list"] {
         gap: 4px; background: rgba(47,143,91,0.08); padding: 4px; border-radius: 14px;
+        position: sticky; top: 0; z-index: 20; backdrop-filter: blur(10px);
     }
     .stTabs [data-baseweb="tab"] {border-radius: 10px; padding: 6px 16px; background: transparent;}
     .stTabs [aria-selected="true"] {
@@ -143,6 +144,12 @@ CSS = """
         border: 1px solid rgba(47,143,91,.25); transition: all .15s ease;
     }
     .stButton > button:hover {transform: translateY(-1px);}
+
+    /* 带边框的容器统一成卡片 */
+    div[data-testid="stVerticalBlockBorderWrapper"] {
+        border-radius: 16px;
+        background: rgba(128,128,128,.04);
+    }
     .stButton > button[kind="primary"] {
         background: linear-gradient(135deg, #2F8F5B, #4CB47F);
         border: none; box-shadow: 0 4px 14px rgba(47,143,91,.25);
@@ -1806,13 +1813,21 @@ with tab_today:
             st.success("已加入：" + st.session_state.pop("quick_msg"))
 
     c1, c2, c3 = st.columns(3)
-    breakfast = c1.text_area(T("早餐"), height=90, key="meal_bf",
-                             placeholder="例：燕麦40g，牛奶250ml，鸡蛋1个")
-    lunch = c2.text_area(T("午餐"), height=90, key="meal_lunch",
-                         placeholder="例：米饭150g，鸡胸肉100g，西兰花150g")
-    dinner = c3.text_area(T("晚餐"), height=90, key="meal_dinner",
-                          placeholder="例：红薯150g，鱼100g，菠菜100g")
-    snack = st.text_input(T("加餐（可选）"), key="meal_snack", placeholder="例：苹果1个，酸奶150g")
+    with c1:
+        with st.container(border=True):
+            breakfast = st.text_area(T("早餐"), height=90, key="meal_bf",
+                                     placeholder="例：燕麦40g，牛奶250ml，鸡蛋1个")
+    with c2:
+        with st.container(border=True):
+            lunch = st.text_area(T("午餐"), height=90, key="meal_lunch",
+                                 placeholder="例：米饭150g，鸡胸肉100g，西兰花150g")
+    with c3:
+        with st.container(border=True):
+            dinner = st.text_area(T("晚餐"), height=90, key="meal_dinner",
+                                  placeholder="例：红薯150g，鱼100g，菠菜100g")
+    with st.container(border=True):
+        snack = st.text_input(T("加餐（可选）"), key="meal_snack",
+                              placeholder="例：苹果1个，酸奶150g")
 
     with st.expander("📏 不知道多少克？常见份量速查"):
         st.markdown(
