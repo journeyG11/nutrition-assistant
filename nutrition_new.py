@@ -56,6 +56,10 @@ DUO_PATH = find_asset("duo.png")
 PANCAKE_PATH = find_asset("pancake.png")
 CROISSANT_PATH = find_asset("croissant.png")
 MEALSET_PATH = find_asset("meal_set.png")
+TOAST_PATH = find_asset("toast.png")
+COOKIE_PATH = find_asset("cookie.png")
+EGG_PATH = find_asset("egg.png")
+PRETZEL_PATH = find_asset("pretzel.png")
 
 
 def _detect_cloud():
@@ -210,7 +214,10 @@ CSS = """
     .warm-img {width: 46px; height: 46px; object-fit: contain; flex: none;}
     .sec-head {display: flex; align-items: center; gap: 8px; margin: 8px 0 12px;
         font-size: 1.05rem; font-weight: 650;}
-    .sec-icon {width: 34px; height: 34px; object-fit: contain;}
+    .sec-icon {height: 30px; width: auto; max-width: 92px; object-fit: contain;}
+    .footer-art {display: flex; justify-content: center; align-items: center;
+        gap: 12px; margin-top: 22px; opacity: .5;}
+    .footer-art img {height: 26px; width: auto;}
     div[data-testid="stAlert"] {border-radius: 14px;}
 
     /* 步骤标题 */
@@ -255,7 +262,8 @@ CSS = """
         .hero-mascot {width: 84px;}
         .empty-img {width: 112px; height: 112px;}
         .side-duo {width: 42px; height: 42px;}
-        .sec-icon {width: 28px; height: 28px;}
+        .sec-icon {height: 24px; max-width: 72px;}
+        .footer-art img {height: 22px;}
         .warm-img {width: 38px; height: 38px;}
         .hero h1 {font-size: 1.55rem;}
         .block-container {padding-left: .95rem; padding-right: .95rem; padding-top: .8rem;}
@@ -1936,9 +1944,10 @@ with tab_today:
         }
 
     if not st.session_state.last_result:
-        _bowl_uri = data_uri(BOWL_PATH) if BOWL_PATH else ""
-        _empty_img = (f'<img class="empty-img" src="{_bowl_uri}" alt="bowl"/>'
-                      if _bowl_uri else '<div class="big">🥗</div>')
+        _empty_src = DUO_PATH or BOWL_PATH
+        _empty_uri = data_uri(_empty_src) if _empty_src else ""
+        _empty_img = (f'<img class="empty-img" src="{_empty_uri}" alt=""/>'
+                      if _empty_uri else '<div class="big">🥗</div>')
         st.markdown(
             f'<div class="empty">{_empty_img}'
             f'<div class="et">今天吃了什么？</div>'
@@ -2459,6 +2468,12 @@ with tab_kb:
             "这样既不会超出模型上下文，也能让回答有据可查。"
         )
 
+_footer_imgs = "".join(
+    f'<img src="{data_uri(p)}" alt=""/>'
+    for p in (TOAST_PATH, EGG_PATH, PRETZEL_PATH) if p
+)
+if _footer_imgs:
+    st.markdown(f'<div class="footer-art">{_footer_imgs}</div>', unsafe_allow_html=True)
 st.markdown(
     '<div class="footer">本工具仅提供饮食参考，不能替代医生或注册营养师的诊断与治疗。</div>',
     unsafe_allow_html=True,
