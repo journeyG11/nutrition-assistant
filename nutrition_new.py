@@ -60,6 +60,12 @@ TOAST_PATH = find_asset("toast.png")
 COOKIE_PATH = find_asset("cookie.png")
 EGG_PATH = find_asset("egg.png")
 PRETZEL_PATH = find_asset("pretzel.png")
+OMELET_PATH = find_asset("omelet.png")
+SHRIMP_PATH = find_asset("shrimp.png")
+BEAR_WATER_PATH = find_asset("bear_water.png")
+BEAR_HANDSTAND_PATH = find_asset("bear_handstand.png")
+BEAR_DUMBBELL_PATH = find_asset("bear_dumbbell.png")
+BEAR_TREADMILL_PATH = find_asset("bear_treadmill.png")
 
 
 def _detect_cloud():
@@ -218,6 +224,8 @@ CSS = """
     .footer-art {display: flex; justify-content: center; align-items: center;
         gap: 12px; margin-top: 22px; opacity: .5;}
     .footer-art img {height: 26px; width: auto;}
+    .quick-art {display: flex; justify-content: flex-end; margin: -4px 0 6px;}
+    .quick-art img {width: 52px; height: 52px; border-radius: 12px;}
     div[data-testid="stAlert"] {border-radius: 14px;}
 
     /* 步骤标题 */
@@ -264,6 +272,7 @@ CSS = """
         .side-duo {width: 42px; height: 42px;}
         .sec-icon {height: 24px; max-width: 72px;}
         .footer-art img {height: 22px;}
+        .quick-art img {width: 44px; height: 44px;}
         .warm-img {width: 38px; height: 38px;}
         .hero h1 {font-size: 1.55rem;}
         .block-container {padding-left: .95rem; padding-right: .95rem; padding-top: .8rem;}
@@ -306,6 +315,19 @@ def data_uri(path):
         return "data:image/png;base64," + base64.b64encode(path.read_bytes()).decode()
     except Exception:
         return ""
+
+
+def sec_header(title, path=None, cls="sec-icon"):
+    """带小插画的章节标题；没有素材时退回普通标题。"""
+    uri = data_uri(path) if path else ""
+    if uri:
+        st.markdown(
+            f'<div class="sec-head"><img class="{cls}" src="{uri}" alt=""/>'
+            f'<span>{title}</span></div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(f"#### {title}")
 
 
 def score_ring(score, color="#2F8F5B", size=104):
@@ -1832,7 +1854,13 @@ with tab_today:
 
     _CATS = ["热门"] + sorted(DISH_BY_CAT.keys())
 
-    with st.expander("🍱 食堂点菜（不想打字就点这里）"):
+    with st.expander("食堂点菜（不想打字就点这里）"):
+        _sh_uri = data_uri(SHRIMP_PATH) if SHRIMP_PATH else ""
+        if _sh_uri:
+            st.markdown(
+                f'<div class="quick-art"><img src="{_sh_uri}" alt=""/></div>',
+                unsafe_allow_html=True,
+            )
         q0, q1, q2, q3 = st.columns([1.1, 2.6, 1, 1])
         _cat = q0.selectbox("分类", _CATS, key="quick_cat", on_change=_clear_quick)
         _opts = (CANTEEN_QUICK if _cat == "热门"
@@ -1944,7 +1972,7 @@ with tab_today:
         }
 
     if not st.session_state.last_result:
-        _empty_src = DUO_PATH or BOWL_PATH
+        _empty_src = OMELET_PATH or DUO_PATH or BOWL_PATH
         _empty_uri = data_uri(_empty_src) if _empty_src else ""
         _empty_img = (f'<img class="empty-img" src="{_empty_uri}" alt=""/>'
                       if _empty_uri else '<div class="big">🥗</div>')
@@ -2181,7 +2209,7 @@ BMI {bmi:.1f}｜BMR {bmr:.0f} kcal｜TDEE {ex['tdee']:.0f} kcal｜建议摄入 {
 
 # ---------------------------- 训练记录 ----------------------------
 with tab_train:
-    st.markdown("#### 今日训练记录")
+    sec_header("今日训练记录", BEAR_DUMBBELL_PATH)
     t_date = st.date_input("训练日期", value=date.today())
 
     with st.container(border=True):
@@ -2278,7 +2306,14 @@ with tab_train:
     st.markdown('<div class="divider-line"></div>', unsafe_allow_html=True)
     train = st.session_state.training
     if not train:
-        st.info("还没有训练记录。填一次就会出现在这里。")
+        _bw_uri = data_uri(BEAR_WATER_PATH) if BEAR_WATER_PATH else ""
+        _bw_img = f'<img class="empty-img" src="{_bw_uri}" alt=""/>' if _bw_uri else ""
+        st.markdown(
+            f'<div class="empty">{_bw_img}'
+            f'<div class="et">还没有训练记录</div>'
+            f'<div class="es">填一次今天的训练，这里就会出现容量曲线和肌群统计。</div></div>',
+            unsafe_allow_html=True,
+        )
     else:
         rows = sorted(train.items(), key=lambda kv: kv[0])[-7:]
         _trows = []
@@ -2325,7 +2360,7 @@ with tab_train:
             st.caption(f"最近一次：{_last['date']}｜{int(_last['duration'])} 分钟｜{_last['actions']} 个动作")
 
     st.markdown('<div class="divider-line"></div>', unsafe_allow_html=True)
-    st.markdown("#### 本周各肌群组数")
+    sec_header("本周各肌群组数", BEAR_TREADMILL_PATH)
     _sets = weekly_group_sets(st.session_state.training)
     _gdf = pd.DataFrame({"组数": [int(_sets.get(g, 0)) for g in EXERCISE_GROUPS]},
                         index=list(EXERCISE_GROUPS))
@@ -2335,7 +2370,7 @@ with tab_train:
     _named = [e for e in EXERCISES
               if any(e in (r.get("exercises") or {}) for r in st.session_state.training.values())]
     if _named:
-        st.markdown("#### 动作进展")
+        sec_header("动作进展", BEAR_HANDSTAND_PATH)
         _pick_ex = st.selectbox("选择动作", _named, key="progress_ex")
         _rows = exercise_progress(st.session_state.training, _pick_ex)
         if _rows:
