@@ -222,8 +222,8 @@ CSS = """
         font-size: 1.05rem; font-weight: 650;}
     .sec-icon {height: 30px; width: auto; max-width: 92px; object-fit: contain;}
     .footer-art {display: flex; justify-content: center; align-items: center;
-        gap: 12px; margin-top: 22px; opacity: .5;}
-    .footer-art img {height: 26px; width: auto;}
+        gap: 14px; margin-top: 22px; opacity: .65;}
+    .footer-art img {height: 30px; width: auto;}
     .quick-art {display: flex; justify-content: flex-end; margin: -4px 0 6px;}
     .quick-art img {width: 52px; height: 52px; border-radius: 12px;}
     div[data-testid="stAlert"] {border-radius: 14px;}
@@ -2505,7 +2505,7 @@ with tab_kb:
 
 _footer_imgs = "".join(
     f'<img src="{data_uri(p)}" alt=""/>'
-    for p in (TOAST_PATH, EGG_PATH, PRETZEL_PATH) if p
+    for p in (COOKIE_PATH, EGG_PATH, PRETZEL_PATH) if p
 )
 if _footer_imgs:
     st.markdown(f'<div class="footer-art">{_footer_imgs}</div>', unsafe_allow_html=True)
