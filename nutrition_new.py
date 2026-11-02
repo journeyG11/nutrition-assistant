@@ -52,6 +52,10 @@ def find_asset(name):
 
 MASCOT_PATH = find_asset("mascot.png")
 BOWL_PATH = find_asset("bowl.png")
+DUO_PATH = find_asset("duo.png")
+PANCAKE_PATH = find_asset("pancake.png")
+CROISSANT_PATH = find_asset("croissant.png")
+MEALSET_PATH = find_asset("meal_set.png")
 
 
 def _detect_cloud():
@@ -202,6 +206,11 @@ CSS = """
         padding: 2px 0 2px 12px; margin-top: 14px;
         font-size: .92rem; opacity: .8; line-height: 1.6;
     }
+    .warm-row {display: flex; align-items: center; gap: 10px;}
+    .warm-img {width: 46px; height: 46px; object-fit: contain; flex: none;}
+    .sec-head {display: flex; align-items: center; gap: 8px; margin: 8px 0 12px;
+        font-size: 1.05rem; font-weight: 650;}
+    .sec-icon {width: 34px; height: 34px; object-fit: contain;}
     div[data-testid="stAlert"] {border-radius: 14px;}
 
     /* 步骤标题 */
@@ -224,15 +233,17 @@ CSS = """
 
     /* 侧边栏档案卡 */
     .side-card {
+        display: flex; align-items: center; justify-content: space-between; gap: 8px;
         background: rgba(47,143,91,.10); border: 1px solid rgba(47,143,91,.22);
         border-radius: 14px; padding: 12px 14px; margin: 4px 0 10px;
     }
+    .side-rows {flex: 1;}
+    .side-duo {width: 52px; height: 52px; object-fit: contain;}
     .side-card .row {display: flex; justify-content: space-between; font-size: .82rem; margin: 3px 0;}
     .side-card .row span {opacity: .7;}
     /* 侧边栏交给 Streamlit 主题自己处理，避免深色模式下浅底浅字 */
     @media (prefers-color-scheme: dark) {
         .tag {background: rgba(47,143,91,0.28);}
-        .hero {background: linear-gradient(120deg, rgba(47,143,91,0.22), rgba(73,179,125,0.08));}
         .mcard, .ring-box {background-color: rgba(255,255,255,.06); border-color: rgba(255,255,255,.14);}
     }
     /* 图表只负责展示，不接收手势，避免手指一碰页面就跟着跑 */
@@ -243,6 +254,9 @@ CSS = """
         .hero-art {display: none;}
         .hero-mascot {width: 84px;}
         .empty-img {width: 112px; height: 112px;}
+        .side-duo {width: 42px; height: 42px;}
+        .sec-icon {width: 28px; height: 28px;}
+        .warm-img {width: 38px; height: 38px;}
         .hero h1 {font-size: 1.55rem;}
         .block-container {padding-left: .95rem; padding-right: .95rem; padding-top: .8rem;}
         .hero {padding: 18px 18px; border-radius: 18px;}
@@ -1586,12 +1600,14 @@ with st.sidebar:
 
     bmr = 10 * weight + 6.25 * height - 5 * age - (161 if gender == "女" else 5)
     bmi = weight / ((height / 100) ** 2)
+    _duo_uri = data_uri(DUO_PATH) if DUO_PATH else ""
+    _duo_img = f'<img class="side-duo" src="{_duo_uri}" alt=""/>' if _duo_uri else ""
     st.markdown(
-        f'<div class="side-card">'
+        f'<div class="side-card"><div class="side-rows">'
         f'<div class="row"><span>基础代谢</span><b>{bmr:.0f} kcal</b></div>'
         f'<div class="row"><span>BMI</span><b>{bmi:.1f}</b></div>'
         f'<div class="row"><span>连续记录</span><b>{streak_days(st.session_state.history)} 天</b></div>'
-        f'</div>',
+        f'</div>{_duo_img}</div>',
         unsafe_allow_html=True,
     )
     if bmi < 18.5:
@@ -1746,7 +1762,15 @@ tab_today, tab_train, tab_trend, tab_kb = st.tabs(
 
 # ---------------------------- 今日评估 ----------------------------
 with tab_today:
-    st.markdown(f"#### {T('一日三餐录入')}")
+    _ms_uri = data_uri(MEALSET_PATH) if MEALSET_PATH else ""
+    if _ms_uri:
+        st.markdown(
+            f'<div class="sec-head"><img class="sec-icon" src="{_ms_uri}" alt=""/>'
+            f'<span>{T("一日三餐录入")}</span></div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        st.markdown(f"#### {T('一日三餐录入')}")
     PRESETS = {
         "食堂套餐": {"bf": "小笼包一笼，豆浆一杯",
                      "lunch": "米饭150g，青椒肉丝一份，炒青菜一份",
@@ -1958,8 +1982,11 @@ with tab_today:
             '</div>',
             unsafe_allow_html=True,
         )
+        _pk_uri = data_uri(PANCAKE_PATH) if PANCAKE_PATH else ""
+        _pk_img = f'<img class="warm-img" src="{_pk_uri}" alt=""/>' if _pk_uri else ""
         st.markdown(
-            f'<div class="warm">{warm_note(res["score"])}</div>',
+            f'<div class="warm-row">{_pk_img}'
+            f'<div class="warm">{warm_note(res["score"])}</div></div>',
             unsafe_allow_html=True,
         )
         st.caption("热量与营养素为估算值，食堂菜品的油盐差异可达 ±20%；"
