@@ -107,27 +107,25 @@ CSS = """
         --amber: #E8A33D;
         --blue: #4A90D9;
         --rose: #D96B6B;
+        --ink: var(--text-color);
+        --muted: inherit;
+        --hairline: rgba(128,128,128,.20);
     }
     html, body, [class*="css"] {
         font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", system-ui, sans-serif;
         letter-spacing: .1px;
     }
-    .stApp {
-        background:
-            radial-gradient(900px 520px at 100% -10%, rgba(47,143,91,.08), transparent 62%),
-            radial-gradient(700px 420px at -10% 110%, rgba(232,163,61,.05), transparent 60%);
-        background-attachment: fixed;
-    }
+    .stApp {background: transparent;}
     .block-container {padding-top: 1.1rem; padding-bottom: 2.5rem; max-width: 1080px;}
 
     /* 顶部横幅 */
     .hero {
         display: flex; justify-content: space-between; align-items: center; gap: 20px;
-        border-bottom: 1px solid rgba(128,128,128,.20);
+        border-bottom: 1px solid var(--hairline);
         padding: 4px 0 14px;
         margin-bottom: 14px;
     }
-    .hero h1 {margin: 0; font-size: 1.7rem; font-weight: 650; letter-spacing: -.2px; color: var(--text-color);}
+    .hero h1 {margin: 0; font-size: 1.7rem; font-weight: 650; color: var(--text-color);}
     .hero p {margin: .3rem 0 0; opacity: .6; font-size: .9rem;}
     .chips {display: flex; gap: 0; margin-top: 8px; flex-wrap: wrap;}
     .chip {
